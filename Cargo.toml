@@ -1,0 +1,33 @@
+[package]
+name = "resolvematrix"
+version = "0.0.1"
+description = "Resolve Matrix servers"
+license = "MPL-2.0"
+authors = ["Jade Ellis <jade@ellis.link>"]
+
+repository = "https://forgejo.ellis.link/continuwuation/resolvematrix.git"
+homepage = "https://forgejo.ellis.link/continuwuation/resolvematrix"
+
+readme = "README.md"
+edition = "2024"
+
+
+[features]
+default = ["server", "reqwest/default-tls", "hickory-resolver/system-config"]
+
+server = ["hickory-resolver"]
+
+[dependencies]
+hickory-resolver = { version = "0.25.2", default-features = false, features = ["tokio"], optional = true }
+reqwest = { version = "0.13.2", default-features = false, features = ["json"] }
+serde = { version = "1.0.228", default-features = false, features = ["serde_derive"] }
+thiserror = { version = "2.0.18", default-features = false }
+tracing = { version = "0.1.44", default-features = false, features = ["attributes"] }
+
+[dev-dependencies]
+rstest = "0.26.1"
+tracing-subscriber = "0.3.23"
+tokio = { version = "1.50.0", default-features = false, features = ["tokio-macros", "test-util"] }
+
+reqwest = { version = "0.13.2", default-features = false, features = ["default-tls"] }
+hickory-resolver = { version = "0.25.2", default-features = false, features = ["system-config"] }
