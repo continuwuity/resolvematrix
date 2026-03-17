@@ -3,4 +3,5 @@
 //!
 //! The library is tested against the resolvematrix.dev suite and live domains.
 
+#[cfg(feature = "server")]
 pub mod server;
