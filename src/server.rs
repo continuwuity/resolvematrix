@@ -41,9 +41,15 @@ pub enum ResolvedDestination {
     Named(String, String),
 }
 
+/// Result of a Matrix server resolution.
+///
+/// Contains the resolved destination (IP/Port or Hostname/Port) and the
+/// hostname to use for SNI/Host headers.
 #[derive(Debug, Clone)]
 pub struct Resolution {
+    /// The actual destination to connect to.
     pub destination: ResolvedDestination,
+    /// The hostname to use for TLS SNI and HTTP Host header.
     pub host: String,
 }
 
@@ -220,6 +226,14 @@ impl Cache {
 }
 
 #[derive(Clone)]
+/// A custom DNS resolver for `reqwest` that handles Matrix server name resolution.
+///
+/// This resolver integrates with the `MatrixResolver` cache and logic to ensure that
+/// HTTP requests made by `reqwest` are routed to the correct IP address and port
+/// as discovered by the Matrix server discovery process.
+///
+/// It exists to ensure that the correct SNI is used. The resolver base URL is the
+/// domain expected for SNI, and the `MatrixDnsResolver` resolves it to the correct destination.
 pub struct MatrixDnsResolver {
     resolver: Arc<TokioResolver>,
     cache: Cache,
@@ -349,9 +363,21 @@ impl MatrixResolver {
     /// Resolve a Matrix server name and return the Resolution.
     ///
     /// The returned Resolution can be used to construct URLs via `resolution.base_url()`.
-    /// Results are cached with TTL for performance.
+    /// When making a request, you must use a client built via the resolver to handle
+    /// SRV records correctly.
     ///
-    /// After resolving, you should recreate the client to get updated DNS mappings.
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use resolvematrix::server::MatrixResolver;
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// let resolver = MatrixResolver::new().await?;
+    /// let resolution = resolver.resolve_server("matrix.org").await?;
+    ///
+    /// assert_eq!(resolution.host, "matrix-federation.matrix.org");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub async fn resolve_server(
         &self,
         server_name: &str,
