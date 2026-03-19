@@ -452,8 +452,11 @@ impl MatrixResolver {
                             "Fallback to .well-known host with default port"
                         );
                         return Ok(Resolution {
-                            destination: ResolvedDestination::Named(domain, "8448".to_owned()),
-                            host: dest.to_owned(),
+                            destination: ResolvedDestination::Named(
+                                domain.clone(),
+                                "8448".to_owned(),
+                            ),
+                            host: domain,
                         });
                     }
                 }
@@ -465,8 +468,8 @@ impl MatrixResolver {
                         "Resolved .well-known domain with port"
                     );
                     return Ok(Resolution {
-                        destination: ResolvedDestination::Named(domain, port.to_string()),
-                        host: dest.to_owned(),
+                        destination: ResolvedDestination::Named(domain.clone(), port.to_string()),
+                        host: domain,
                     });
                 }
             }
