@@ -203,7 +203,7 @@ impl Cache {
         CacheLookup::Miss
     }
 
-    fn set(&self, server_name: String, resolution: Resolution) {
+    fn set(&self, server_name: String, resolution: &Resolution) {
         if let Ok(mut cache) = self.inner.write() {
             cache.insert(
                 server_name.clone(),
@@ -319,12 +319,20 @@ pub struct MatrixResolver {
 
 impl MatrixResolver {
     /// Create a new `MatrixResolver` with default TTL of 5 minutes.
-    pub async fn new() -> Result<Self, ResolveServerError> {
-        Self::new_with_ttl(Duration::from_secs(300)).await
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
+    pub fn new() -> Result<Self, ResolveServerError> {
+        Self::new_with_ttl(Duration::from_secs(300))
     }
 
     /// Create a new `MatrixResolver` with a custom cache TTL.
-    pub async fn new_with_ttl(cache_ttl: Duration) -> Result<Self, ResolveServerError> {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
+    pub fn new_with_ttl(cache_ttl: Duration) -> Result<Self, ResolveServerError> {
         let resolver = Arc::new(hickory_resolver::Resolver::builder_tokio()?.build());
 
         let client = Client::builder()
@@ -344,6 +352,10 @@ impl MatrixResolver {
     ///
     /// The client uses a custom DNS resolver that dynamically looks up Matrix servers
     /// from the cache, allowing one client to handle all federation requests.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the client cannot be built.
     pub fn create_client_with_builder(
         self: &Arc<Self>,
         builder: reqwest::ClientBuilder,
@@ -355,6 +367,10 @@ impl MatrixResolver {
     }
 
     /// Create a standard reqwest client that can be reused for all Matrix servers.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the client cannot be built.
     pub fn create_client(self: &Arc<Self>) -> Result<Client, ResolveServerError> {
         let builder = Client::builder().timeout(std::time::Duration::from_secs(10));
         self.create_client_with_builder(builder)
@@ -366,12 +382,16 @@ impl MatrixResolver {
     /// When making a request, you must use a client built via the resolver to handle
     /// SRV records correctly.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if resolution fails (e.g. DNS failure, invalid response).
+    ///
     /// # Example
     ///
     /// ```rust,no_run
     /// # use resolvematrix::server::MatrixResolver;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let resolver = MatrixResolver::new().await?;
+    /// let resolver = MatrixResolver::new()?;
     /// let resolution = resolver.resolve_server("matrix.org").await?;
     ///
     /// assert_eq!(resolution.host, "matrix-federation.matrix.org");
@@ -392,7 +412,7 @@ impl MatrixResolver {
         let resolution = self.resolve_actual_dest(server_name).await?;
 
         // Cache the result
-        self.cache.set(server_name.to_string(), resolution.clone());
+        self.cache.set(server_name.to_string(), &resolution);
 
         Ok(resolution)
     }
@@ -538,9 +558,8 @@ impl MatrixResolver {
         }
         let url = format!("https://{hostname}/.well-known/matrix/server");
         tracing::trace!(url = %url, "Fetching .well-known matrix server");
-        let resp = match self.client.get(&url).send().await {
-            Ok(r) => r,
-            Err(_) => return None,
+        let Ok(resp) = self.client.get(&url).send().await else {
+            return None;
         };
         if resp.status() != StatusCode::OK {
             return None;
@@ -694,7 +713,7 @@ mod tests {
     #[tokio::test]
     async fn test_resolve() {
         init_tracing();
-        let resolver = MatrixResolver::new().await.unwrap();
+        let resolver = MatrixResolver::new().unwrap();
         let _ = dbg!(resolver.resolve_server("matrix.org").await.unwrap());
         let _ = dbg!(resolver.resolve_server("ellis.link").await.unwrap());
     }
@@ -708,6 +727,19 @@ mod tests {
                     .with_target(false),
             )
             .try_init();
+    }
+
+    #[allow(dead_code)]
+    #[derive(Deserialize, Debug)]
+    struct ServerVersionEndpoint {
+        pub server: ServerVersionServer,
+    }
+
+    #[allow(dead_code)]
+    #[derive(Deserialize, Debug)]
+    struct ServerVersionServer {
+        pub name: String,
+        pub version: String,
     }
 
     /// Parameterized test for server resolution.
@@ -729,7 +761,7 @@ mod tests {
     async fn test_server_resolver(#[case] server_name: &str) {
         init_tracing();
 
-        let resolver = Arc::new(MatrixResolver::new().await.unwrap());
+        let resolver = Arc::new(MatrixResolver::new().unwrap());
 
         tracing::info!("Testing {server_name}");
 
@@ -750,19 +782,6 @@ mod tests {
         let request = client.get(&url).build().unwrap();
 
         let response = client.execute(request).await;
-
-        #[allow(dead_code)]
-        #[derive(Deserialize, Debug)]
-        struct ServerVersionEndpoint {
-            pub server: ServerVersionServer,
-        }
-
-        #[allow(dead_code)]
-        #[derive(Deserialize, Debug)]
-        struct ServerVersionServer {
-            pub name: String,
-            pub version: String,
-        }
 
         match response {
             Ok(resp) => {
@@ -827,7 +846,7 @@ mod tests {
     async fn test_well_known_resolution(#[case] server_name: &str) {
         init_tracing();
 
-        let resolver = MatrixResolver::new().await.unwrap();
+        let resolver = MatrixResolver::new().unwrap();
         let resolution = resolver.resolve_server(server_name).await;
 
         assert!(
@@ -866,7 +885,7 @@ mod tests {
     async fn test_explicit_port_resolution(#[case] server_name: &str) {
         init_tracing();
 
-        let resolver = MatrixResolver::new().await.unwrap();
+        let resolver = MatrixResolver::new().unwrap();
         let resolution = resolver.resolve_server(server_name).await;
 
         assert!(
@@ -907,7 +926,7 @@ mod tests {
     async fn test_ip_literal_resolution(#[case] server_name: &str) {
         init_tracing();
 
-        let resolver = MatrixResolver::new().await.unwrap();
+        let resolver = MatrixResolver::new().unwrap();
         let resolution = resolver.resolve_server(server_name).await;
 
         assert!(
@@ -927,7 +946,9 @@ mod tests {
                     assert_eq!(addr.port(), 8448, "Should default to port 8448");
                 }
             }
-            _ => panic!("IP literal should resolve to Literal variant"),
+            ResolvedDestination::Named(..) => {
+                panic!("IP literal should resolve to Literal variant")
+            }
         }
     }
 
@@ -936,7 +957,7 @@ mod tests {
     async fn test_client_reuse() {
         init_tracing();
 
-        let resolver = Arc::new(MatrixResolver::new().await.unwrap());
+        let resolver = Arc::new(MatrixResolver::new().unwrap());
 
         // Create ONE client that will be reused for all servers
         let builder = Client::builder()

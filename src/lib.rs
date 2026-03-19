@@ -18,7 +18,7 @@
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! // Create a new resolver
-//! let resolver = Arc::new(MatrixResolver::new().await?);
+//! let resolver = Arc::new(MatrixResolver::new()?);
 //!
 //! // Resolve a server name
 //! let server_name = "matrix.org";

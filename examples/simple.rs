@@ -6,7 +6,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // tracing_subscriber::fmt::init();
 
     // Create a new resolver with default configuration
-    let resolver = MatrixResolver::new().await?;
+    let resolver = MatrixResolver::new()?;
 
     // List of matrix servers to try resolving to demonstrate different discovery paths
     let servers = vec![

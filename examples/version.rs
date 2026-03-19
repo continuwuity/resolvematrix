@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let resolver = Arc::new(MatrixResolver::new().await?);
+    let resolver = Arc::new(MatrixResolver::new()?);
 
     let server_name = "matrix.org";
     let resolution = resolver.resolve_server(server_name).await?;
