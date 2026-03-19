@@ -1,6 +1,6 @@
 [package]
 name = "resolvematrix"
-version = "0.0.2"
+version = "0.0.3"
 description = "Resolve Matrix servers"
 license = "MPL-2.0"
 authors = ["Jade Ellis <jade@ellis.link>"]
