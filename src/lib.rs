@@ -29,7 +29,7 @@
 //! let url = format!("{}/_matrix/federation/v1/version", resolution.base_url());
 //! let response = client.get(&url).send().await;
 //!
-//! Ok(())
+//! # Ok(())
 //! # }
 //! ```
 

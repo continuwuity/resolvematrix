@@ -62,9 +62,9 @@ repos:
     hooks:
       - id: cargo-readme
         name: cargo readme
-        entry: cargo cargo readme > README.md
+        entry: cargo readme -o README.md
         language: system
         pass_filenames: false
         types: [rust]
         stages:
-          - manual
+          - pre-commit

@@ -26,7 +26,7 @@ This library depends on hickory-resolver, reqwest, serde and (indirectly) tokio.
 use resolvematrix::server::MatrixResolver;
 
 // Create a new resolver
-let resolver = Arc::new(MatrixResolver::new().await?);
+let resolver = Arc::new(MatrixResolver::new()?);
 
 // Resolve a server name
 let server_name = "matrix.org";
@@ -37,7 +37,6 @@ let client = resolver.create_client().unwrap();
 let url = format!("{}/_matrix/federation/v1/version", resolution.base_url());
 let response = client.get(&url).send().await;
 
-Ok(())
 ```
 
 License: MPL-2.0
