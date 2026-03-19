@@ -50,9 +50,10 @@ pub struct Resolution {
 impl Resolution {
     /// Get the base URL for making requests to this resolution.
     /// Uses the host field for proper SNI.
+    #[must_use]
     pub fn base_url(&self) -> String {
         match &self.destination {
-            ResolvedDestination::Literal(addr) => format!("https://{}", addr),
+            ResolvedDestination::Literal(addr) => format!("https://{addr}"),
             ResolvedDestination::Named(_dest_host, dest_port) => {
                 let port: u16 = dest_port.parse().unwrap_or(8448);
                 if self.host.contains(':') {
@@ -252,14 +253,14 @@ impl reqwest::dns::Resolve for MatrixDnsResolver {
                 CacheLookup::Valid(resolution) => {
                     // Valid cached entry - use it
                     if let Some(addr) = resolution.destination_addr(&resolver).await {
-                        tracing::debug!("DNS cache hit for {} -> {}", name_str, addr);
+                        tracing::trace!("DNS cache hit for {name_str} -> {addr}");
                         return Ok(Box::new(std::iter::once(addr))
                             as Box<dyn Iterator<Item = SocketAddr> + Send>);
                     }
                 }
                 CacheLookup::ExpiredOverride(server_name) => {
                     // Expired Matrix override - refetch via Matrix resolution
-                    tracing::debug!("DNS cache expired override for {}, refetching", name_str);
+                    tracing::trace!("DNS cache expired override for {name_str}, refetching");
                     match matrix_resolver.resolve_server(&server_name).await {
                         Ok(resolution) => {
                             if let Some(addr) = resolution.destination_addr(&resolver).await {
@@ -270,11 +271,7 @@ impl reqwest::dns::Resolve for MatrixDnsResolver {
                             }
                         }
                         Err(e) => {
-                            tracing::warn!(
-                                "Failed to refetch Matrix server {}: {}",
-                                server_name,
-                                e
-                            );
+                            tracing::warn!("Failed to refetch Matrix server {server_name}: {e:?}",);
                         }
                     }
                 }
@@ -284,7 +281,7 @@ impl reqwest::dns::Resolve for MatrixDnsResolver {
             }
 
             // Fallback: standard DNS lookup
-            tracing::debug!("DNS fallback for {}, using standard DNS", name_str);
+            tracing::trace!("DNS fallback for {name_str}, using standard DNS");
             match resolver.lookup_ip(&name_str).await {
                 Ok(lookup) => {
                     let addrs: Vec<SocketAddr> = lookup
@@ -307,12 +304,12 @@ pub struct MatrixResolver {
 }
 
 impl MatrixResolver {
-    /// Create a new MatrixResolver with default TTL of 5 minutes.
+    /// Create a new `MatrixResolver` with default TTL of 5 minutes.
     pub async fn new() -> Result<Self, ResolveServerError> {
         Self::new_with_ttl(Duration::from_secs(300)).await
     }
 
-    /// Create a new MatrixResolver with a custom cache TTL.
+    /// Create a new `MatrixResolver` with a custom cache TTL.
     pub async fn new_with_ttl(cache_ttl: Duration) -> Result<Self, ResolveServerError> {
         let resolver = Arc::new(hickory_resolver::Resolver::builder_tokio()?.build());
 
@@ -361,7 +358,7 @@ impl MatrixResolver {
     ) -> Result<Resolution, ResolveServerError> {
         // Check cache first
         if let Some(resolution) = self.cache.get(server_name) {
-            tracing::debug!("Cache hit for {}", server_name);
+            tracing::trace!("Cache hit for {server_name}");
             return Ok(resolution);
         }
 
@@ -446,7 +443,7 @@ impl MatrixResolver {
                         });
                     } else {
                         // 3.5: No SRV, fallback to A/AAAA/CNAME + 8448
-                        tracing::debug!(
+                        tracing::trace!(
                             delegated = %domain,
                             step = "well_known_fallback",
                             "Fallback to .well-known host with default port"
@@ -477,7 +474,7 @@ impl MatrixResolver {
 
         // 4. SRV lookup on original hostname
         if let Some((srv_host, srv_port)) = self.query_srv_record(dest).await? {
-            tracing::debug!(
+            tracing::trace!(
                 srv_host = %srv_host,
                 srv_port = srv_port,
                 step = "srv_lookup",
@@ -490,7 +487,7 @@ impl MatrixResolver {
         }
 
         // 5. Fallback: A/AAAA/CNAME + 8448
-        tracing::debug!(
+        tracing::trace!(
             host = %dest,
             step = "fallback",
             "Fallback to original hostname with default port"
@@ -514,7 +511,7 @@ impl MatrixResolver {
             m_server: String,
         }
         let url = format!("https://{hostname}/.well-known/matrix/server");
-        tracing::debug!(url = %url, "Fetching .well-known matrix server");
+        tracing::trace!(url = %url, "Fetching .well-known matrix server");
         let resp = match self.client.get(&url).send().await {
             Ok(r) => r,
             Err(_) => return None,
@@ -534,7 +531,7 @@ impl MatrixResolver {
             }
         };
         if let Some((ip, port)) = get_ip_with_port(&wk.m_server) {
-            tracing::debug!(
+            tracing::trace!(
                 ip = %ip,
                 port = ?port,
                 "Parsed .well-known matrix server IP and port"
@@ -542,7 +539,7 @@ impl MatrixResolver {
             return Some(WellKnownServerResult::Ip(ip, port));
         }
         let (host, port) = parse_server_name(&wk.m_server);
-        tracing::debug!(
+        tracing::trace!(
             well_known_host = %host,
             well_known_port = ?port,
             "Parsed .well-known matrix server domain"
@@ -601,7 +598,7 @@ fn parse_server_name(server_name: &str) -> (String, Option<u16>) {
     (server_name.to_string(), None)
 }
 
-/// If the string is an IP literal (with optional port), returns (IpAddr, port).
+/// If the string is an IP literal (with optional port), returns (`IpAddr`, port).
 #[tracing::instrument(
     name = "get_ip_with_port",
     level = "trace",
@@ -610,7 +607,7 @@ fn parse_server_name(server_name: &str) -> (String, Option<u16>) {
 fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
     // Try SocketAddr first (IP:port)
     if let Ok(sock) = SocketAddr::from_str(s) {
-        tracing::debug!(
+        tracing::trace!(
             ip = %sock.ip(),
             port = sock.port(),
             "Parsed SocketAddr from input"
@@ -619,7 +616,7 @@ fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
     }
     // Try IP only
     if let Ok(ip) = IpAddr::from_str(s) {
-        tracing::debug!(
+        tracing::trace!(
             ip = %ip,
             port = 8448,
             "Parsed IpAddr from input, using default port"
@@ -708,7 +705,7 @@ mod tests {
 
         let resolver = Arc::new(MatrixResolver::new().await.unwrap());
 
-        tracing::info!("Testing {}/_matrix/federation/v1/version", server_name);
+        tracing::info!("Testing {server_name}");
 
         // Resolve server
         let resolution = resolver.resolve_server(server_name).await.unwrap();
@@ -745,33 +742,25 @@ mod tests {
             Ok(resp) => {
                 let status = resp.status();
                 let json: Option<ServerVersionEndpoint> = resp.json().await.ok();
-                tracing::debug!("Response status: {}", status);
+                tracing::debug!(%status, "Response");
 
                 if status == StatusCode::OK {
                     tracing::info!(
                         "✓ Successfully fetched federation version from {server_name}: {json:?}"
                     );
                 } else {
-                    tracing::warn!(
-                        "Server {} returned non-200 status: {}.",
-                        server_name,
-                        status
-                    );
+                    tracing::warn!("Server {server_name} returned non-200 status: {status}.");
                     panic!();
                 }
             }
             Err(e) => {
-                tracing::warn!(
-                    "Failed to fetch federation version from {}: {:?}",
-                    server_name,
-                    e
-                );
+                tracing::warn!("Failed to fetch federation version from {server_name}: {e:?}");
                 panic!();
             }
         }
     }
 
-    /// Test parse_server_name function with various inputs
+    /// Test `parse_server_name` function with various inputs
     #[rstest]
     #[case::no_port("matrix.org", "matrix.org", None)]
     #[case::with_port("matrix.org:8448", "matrix.org", Some(8448))]
@@ -817,15 +806,13 @@ mod tests {
 
         assert!(
             resolution.is_ok(),
-            "Failed to resolve {}: {:?}",
-            server_name,
+            "Failed to resolve {server_name}: {:?}",
             resolution.err()
         );
 
         let resolved = resolution.unwrap();
         tracing::info!(
-            "Resolved {} to destination: {:?}, host: {}",
-            server_name,
+            "Resolved {server_name} to destination: {:?}, host: {}",
             resolved.destination,
             resolved.host
         );
@@ -858,8 +845,7 @@ mod tests {
 
         assert!(
             resolution.is_ok(),
-            "Failed to resolve {}: {:?}",
-            server_name,
+            "Failed to resolve {server_name}: {:?}",
             resolution.err()
         );
 
@@ -900,8 +886,7 @@ mod tests {
 
         assert!(
             resolution.is_ok(),
-            "Failed to resolve {}: {:?}",
-            server_name,
+            "Failed to resolve {server_name}: {:?}",
             resolution.err()
         );
 
@@ -936,7 +921,7 @@ mod tests {
         let servers = vec!["matrix.org", "nexy7574.co.uk", "matrixrooms.info"];
 
         for server_name in servers {
-            tracing::info!("Testing {} with reused client", server_name);
+            tracing::info!("Testing {server_name} with reused client");
 
             // Resolve the server
             let resolution = resolver.resolve_server(server_name).await.unwrap();
@@ -951,7 +936,7 @@ mod tests {
             match response {
                 Ok(resp) => {
                     let status = resp.status();
-                    tracing::info!("✓ {} returned status {}", server_name, status);
+                    tracing::info!("✓ {server_name} returned status {status}");
                     assert_eq!(status, StatusCode::OK);
                 }
                 Err(e) => {
