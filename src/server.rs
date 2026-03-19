@@ -633,6 +633,7 @@ fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
 #[cfg(test)]
 mod tests {
     use rstest::rstest;
+    use tracing::debug;
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
     use super::*;
@@ -692,6 +693,7 @@ mod tests {
     #[case::timedout_uk_port("timedout.uk:69")]
     #[case::nexy7574_co_uk("nexy7574.co.uk")]
     #[case::matrix_org("matrix.org")]
+    #[case::matrixrooms_info("matrixrooms.info")]
     #[case::resolvematrix_2_port("2.s.resolvematrix.dev:7652")]
     #[case::resolvematrix_3b("3b.s.resolvematrix.dev")]
     #[case::resolvematrix_3c("3c.s.resolvematrix.dev")]
@@ -719,34 +721,48 @@ mod tests {
 
         // Build URL using the resolution's base_url
         let url = format!("{}/_matrix/federation/v1/version", resolution.base_url());
+
+        debug!(?resolution, ?url, "Resolved server");
+
         let request = client.get(&url).build().unwrap();
 
         let response = client.execute(request).await;
 
+        #[allow(dead_code)]
+        #[derive(Deserialize, Debug)]
+        struct ServerVersionEndpoint {
+            pub server: ServerVersionServer,
+        }
+
+        #[allow(dead_code)]
+        #[derive(Deserialize, Debug)]
+        struct ServerVersionServer {
+            pub name: String,
+            pub version: String,
+        }
+
         match response {
             Ok(resp) => {
                 let status = resp.status();
-                let text = resp.text().await.unwrap_or_default();
-                tracing::debug!("Response status: {}, body: {}", status, text);
+                let json: Option<ServerVersionEndpoint> = resp.json().await.ok();
+                tracing::debug!("Response status: {}", status);
 
                 if status == StatusCode::OK {
                     tracing::info!(
-                        "✓ Successfully fetched federation version from {}",
-                        server_name
+                        "✓ Successfully fetched federation version from {server_name}: {json:?}"
                     );
                 } else {
                     tracing::warn!(
-                        "Server {} returned non-200 status: {}. Body: {}.",
+                        "Server {} returned non-200 status: {}.",
                         server_name,
-                        status,
-                        text
+                        status
                     );
                     panic!();
                 }
             }
             Err(e) => {
                 tracing::warn!(
-                    "Failed to fetch federation version from {}: {}",
+                    "Failed to fetch federation version from {}: {:?}",
                     server_name,
                     e
                 );
@@ -917,8 +933,7 @@ mod tests {
             .timeout(std::time::Duration::from_secs(10));
         let client = resolver.create_client_with_builder(builder).unwrap();
 
-        // Test multiple servers with the SAME client
-        let servers = vec!["matrix.org", "nexy7574.co.uk"];
+        let servers = vec!["matrix.org", "nexy7574.co.uk", "matrixrooms.info"];
 
         for server_name in servers {
             tracing::info!("Testing {} with reused client", server_name);
@@ -928,6 +943,9 @@ mod tests {
 
             // Make a request
             let url = format!("{}/_matrix/federation/v1/version", resolution.base_url());
+
+            debug!(?resolution, ?url, "Resolved server");
+
             let response = client.get(&url).send().await;
 
             match response {
@@ -937,7 +955,7 @@ mod tests {
                     assert_eq!(status, StatusCode::OK);
                 }
                 Err(e) => {
-                    tracing::warn!("Failed to fetch from {}: {}", server_name, e);
+                    tracing::warn!("Failed to fetch from {server_name}: {e:?}");
                     panic!("Request failed");
                 }
             }
