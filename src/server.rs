@@ -970,6 +970,33 @@ mod tests {
         }
     }
 
+    #[rstest]
+    #[case::resolvematrix_2_port("2.s.resolvematrix.dev:7652", "2.s.resolvematrix.dev", 7652)] // Explicit port
+    #[case::resolvematrix_3b("3b.s.resolvematrix.dev", "wk.3b.s.resolvematrix.dev", 7753)] // Delegated explicit port
+    #[case::resolvematrix_3c("3c.s.resolvematrix.dev", "srv.wk.3c.s.resolvematrix.dev", 7754)] // Delegated `matrix` SRV
+    #[case::resolvematrix_3d("3d.s.resolvematrix.dev", "wd.3d.s.resolvematrix.dev", 8448)] // Delegated default port
+    #[case::resolvematrix_4("4.s.resolvematrix.dev", "srv.4.s.resolvematrix.dev", 7855)] // `matrix` SRV
+    #[case::resolvematrix_5("5.s.resolvematrix.dev", "5.s.resolvematrix.dev", 8448)] // Default port
+    #[case::resolvematrix_3c_msc4040("3c.msc4040.s.resolvematrix.dev", "srv.wk.3c.msc4040.s.resolvematrix.dev", 7063)] // Delegated `matrix-fed` SRV
+    #[case::resolvematrix_4_msc4040("4.msc4040.s.resolvematrix.dev", "srv.4.msc4040.s.resolvematrix.dev", 7054)] // `matrix-fed` SRV
+    #[tokio::test]
+    async fn test_resolvematrix(
+        #[case] input: &str,
+        #[case] expected_host: &str,
+        #[case] expected_port: u16,
+    ) {
+        let resolver = Arc::new(MatrixResolver::new().unwrap());
+
+        tracing::info!("Testing {input}");
+
+        // Resolve server
+        let resolution = resolver.resolve_server(input).await.unwrap();
+
+        assert_eq!(resolution.destination.hostname(), expected_host);
+        assert_eq!(resolution.destination.port(), expected_port);
+
+    }
+
     /// Demonstrate reuse of the same client across different resolutions
     #[tokio::test]
     async fn test_client_reuse() {
