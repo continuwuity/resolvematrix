@@ -105,6 +105,24 @@ impl Resolution {
     }
 }
 
+impl ResolvedDestination {
+    /// Get the destination hostname
+    pub fn hostname(&self) -> String {
+        match &self {
+            ResolvedDestination::Literal(addr) => addr.ip().to_string(),
+            ResolvedDestination::Named(dest_host, _dest_port) => dest_host.clone(),
+        }
+    }
+
+    /// Get the destination port
+    pub fn port(&self) -> u16 {
+        match &self {
+            ResolvedDestination::Literal(addr) => addr.port(),
+            ResolvedDestination::Named(_dest_host, dest_port) => dest_port.parse::<u16>().unwrap_or(8448),
+        }
+    }
+}
+
 /// Simple cache entry with expiry time.
 #[derive(Clone, Debug)]
 struct CacheEntry {
