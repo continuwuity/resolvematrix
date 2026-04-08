@@ -133,7 +133,7 @@ impl ResolvedDestination {
 
 /// Simple cache entry with expiry time.
 #[derive(Clone, Debug)]
-struct CacheEntry {
+pub struct CacheEntry {
     resolution: Resolution,
     expires_at: Instant,
     is_override: bool, // If true, this is a Matrix resolution that should be refetched when expired
@@ -247,6 +247,21 @@ impl Cache {
                     hostname_map.insert(sni_hostname, server_name);
                 }
             }
+        }
+    }
+
+    /// Remove a single entry from the cache, returning the previously existing entry if there was one
+    fn remove_entry(&self, server_name: &str) -> Option<CacheEntry> {
+        match self.inner.write() {
+            Ok(mut cache) => cache.remove(server_name),
+            Err(_) => None,
+        }
+    }
+
+    /// Clear all cache entries. Returns nothing.
+    fn clear(&self) {
+        if let Ok(mut cache) = self.inner.write() {
+            cache.clear();
         }
     }
 }
@@ -645,6 +660,25 @@ impl MatrixResolver {
         }
         tracing::trace!(hostname = %hostname, "No SRV records found for hostname");
         Ok(None)
+    }
+
+    /// Remove a single entry from the cache, returning the removed entry if it existed
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(hostname = %hostname)
+    )]
+    pub fn remove_cache_entry(&self, hostname: &str) -> Option<CacheEntry> {
+        self.cache.remove_entry(hostname)
+    }
+
+    /// Clear entire cache
+    #[tracing::instrument(
+        level = "trace",
+        skip(self)
+    )]
+    pub fn clear_cache(&self) -> () {
+        self.cache.clear()
     }
 }
 
