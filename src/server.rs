@@ -734,6 +734,7 @@ fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
 
 #[cfg(test)]
 mod tests {
+    use assertables::{assert_none, assert_some};
     use rstest::rstest;
     use tracing::debug;
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -1079,5 +1080,79 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_cache_remove_entry() {
+        init_tracing();
+
+        // Setup code
+        let cache = Cache::new(Duration::from_secs(300));
+
+        let server1_name = "matrix.org";
+        let server1_resolution = Resolution {
+            destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
+            host: String::from(server1_name),
+        };
+
+        let server2_name = "example.com";
+        let server2_resolution = Resolution {
+            destination: ResolvedDestination::Named("example.com".to_string(), "8448".to_string()),
+            host: String::from(server2_name),
+        };
+
+        cache.set(String::from(server1_name), &server1_resolution);
+        cache.set(String::from(server2_name), &server2_resolution);
+
+        // Actual test
+        let server1_removed = cache.remove_entry(&server1_name);
+        assert_some!(&server1_removed);
+
+        // Ensure data of removed object matches what was put in originally
+        let server1_removed_unwrapped = server1_removed.unwrap();
+        assert_eq!(server1_removed_unwrapped.resolution.host, server1_resolution.host);
+        assert_eq!(server1_removed_unwrapped.resolution.base_url(), server1_resolution.base_url());
+
+        // Check that trying to access the removed cache entry gives us None
+        let server1_check_actually_removed = cache.remove_entry(&server1_name);
+        assert_none!(server1_check_actually_removed);
+
+        // Query server2 to ensure it still exists
+        let server2_queried = cache.get(&server2_name);
+        assert_some!(server2_queried);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_cache_clear() {
+        init_tracing();
+
+        // Setup code
+        let cache = Cache::new(Duration::from_secs(300));
+
+        let server1_name = "matrix.org";
+        let server1_resolution = Resolution {
+            destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
+            host: String::from(server1_name),
+        };
+
+        let server2_name = "example.com";
+        let server2_resolution = Resolution {
+            destination: ResolvedDestination::Named("example.com".to_string(), "8448".to_string()),
+            host: String::from(server2_name),
+        };
+
+        cache.set(String::from(server1_name), &server1_resolution);
+        cache.set(String::from(server2_name), &server2_resolution);
+
+        // Actual test
+        cache.clear();
+
+        // Query servers to ensure they are actually gone
+        let server1_queried = cache.get(&server1_name);
+        let server2_queried = cache.get(&server2_name);
+        assert_none!(server1_queried);
+        assert_none!(server2_queried);
     }
 }

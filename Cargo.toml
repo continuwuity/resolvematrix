@@ -18,6 +18,7 @@ default = ["server", "reqwest/default-tls", "hickory-resolver/system-config"]
 server = ["hickory-resolver"]
 
 [dependencies]
+assertables = "9.8.6"
 hickory-resolver = { version = "0.25.2", default-features = false, features = ["tokio"], optional = true }
 reqwest = { version = "0.13.2", default-features = false, features = ["json"] }
 serde = { version = "1.0.228", default-features = false, features = ["serde_derive"] }
