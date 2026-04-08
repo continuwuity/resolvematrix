@@ -121,6 +121,14 @@ impl ResolvedDestination {
             ResolvedDestination::Named(_dest_host, dest_port) => dest_port.parse::<u16>().unwrap_or(8448),
         }
     }
+
+    /// Return the host:port formatted string of the resolved destination server (not SNI host)
+    pub fn host_port(&self) -> String {
+        match &self {
+            ResolvedDestination::Literal(addr) => addr.to_string(),
+            ResolvedDestination::Named(host, port) => format!("{host}:{port}"),
+        }
+    }
 }
 
 /// Simple cache entry with expiry time.
