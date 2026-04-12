@@ -1112,7 +1112,7 @@ mod tests {
         cache.set(String::from(server2_name), &server2_resolution);
 
         // Actual test
-        let server1_removed = cache.remove_entry(&server1_name);
+        let server1_removed = cache.remove_entry(server1_name);
         assert_some!(&server1_removed);
 
         // Ensure data of removed object matches what was put in originally
@@ -1127,11 +1127,11 @@ mod tests {
         );
 
         // Check that trying to access the removed cache entry gives us None
-        let server1_check_actually_removed = cache.remove_entry(&server1_name);
+        let server1_check_actually_removed = cache.remove_entry(server1_name);
         assert_none!(server1_check_actually_removed);
 
         // Query server2 to ensure it still exists
-        let server2_queried = cache.get(&server2_name);
+        let server2_queried = cache.get(server2_name);
         assert_some!(server2_queried);
     }
 
@@ -1162,8 +1162,8 @@ mod tests {
         cache.clear();
 
         // Query servers to ensure they are actually gone
-        let server1_queried = cache.get(&server1_name);
-        let server2_queried = cache.get(&server2_name);
+        let server1_queried = cache.get(server1_name);
+        let server2_queried = cache.get(server2_name);
         assert_none!(server1_queried);
         assert_none!(server2_queried);
     }
