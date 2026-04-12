@@ -118,7 +118,9 @@ impl ResolvedDestination {
     pub fn port(&self) -> u16 {
         match &self {
             ResolvedDestination::Literal(addr) => addr.port(),
-            ResolvedDestination::Named(_dest_host, dest_port) => dest_port.parse::<u16>().unwrap_or(8448),
+            ResolvedDestination::Named(_dest_host, dest_port) => {
+                dest_port.parse::<u16>().unwrap_or(8448)
+            }
         }
     }
 
@@ -673,11 +675,8 @@ impl MatrixResolver {
     }
 
     /// Clear entire cache
-    #[tracing::instrument(
-        level = "trace",
-        skip(self)
-    )]
-    pub fn clear_cache(&self) -> () {
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub fn clear_cache(&self) {
         self.cache.clear()
     }
 }
@@ -1020,8 +1019,16 @@ mod tests {
     #[case::resolvematrix_3d("3d.s.resolvematrix.dev", "wk.3d.s.resolvematrix.dev", 8448)] // Delegated default port
     #[case::resolvematrix_4("4.s.resolvematrix.dev", "srv.4.s.resolvematrix.dev", 7855)] // `matrix` SRV
     #[case::resolvematrix_5("5.s.resolvematrix.dev", "5.s.resolvematrix.dev", 8448)] // Default port
-    #[case::resolvematrix_3c_msc4040("3c.msc4040.s.resolvematrix.dev", "srv.wk.3c.msc4040.s.resolvematrix.dev", 7053)] // Delegated `matrix-fed` SRV
-    #[case::resolvematrix_4_msc4040("4.msc4040.s.resolvematrix.dev", "srv.4.msc4040.s.resolvematrix.dev", 7054)] // `matrix-fed` SRV
+    #[case::resolvematrix_3c_msc4040(
+        "3c.msc4040.s.resolvematrix.dev",
+        "srv.wk.3c.msc4040.s.resolvematrix.dev",
+        7053
+    )] // Delegated `matrix-fed` SRV
+    #[case::resolvematrix_4_msc4040(
+        "4.msc4040.s.resolvematrix.dev",
+        "srv.4.msc4040.s.resolvematrix.dev",
+        7054
+    )] // `matrix-fed` SRV
     #[tokio::test]
     async fn test_resolvematrix(
         #[case] input: &str,
@@ -1037,7 +1044,6 @@ mod tests {
 
         assert_eq!(resolution.destination.hostname(), expected_host);
         assert_eq!(resolution.destination.port(), expected_port);
-
     }
 
     /// Demonstrate reuse of the same client across different resolutions
@@ -1111,8 +1117,14 @@ mod tests {
 
         // Ensure data of removed object matches what was put in originally
         let server1_removed_unwrapped = server1_removed.unwrap();
-        assert_eq!(server1_removed_unwrapped.resolution.host, server1_resolution.host);
-        assert_eq!(server1_removed_unwrapped.resolution.base_url(), server1_resolution.base_url());
+        assert_eq!(
+            server1_removed_unwrapped.resolution.host,
+            server1_resolution.host
+        );
+        assert_eq!(
+            server1_removed_unwrapped.resolution.base_url(),
+            server1_resolution.base_url()
+        );
 
         // Check that trying to access the removed cache entry gives us None
         let server1_check_actually_removed = cache.remove_entry(&server1_name);
