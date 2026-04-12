@@ -74,3 +74,8 @@ jobs:
             --locked \
             --profile test \
             --no-fail-fast
+
+      - name: Install cargo-msrv
+        run: cargo-binstall -y --no-symlinks cargo-msrv
+      - name: Check MSRV
+        run: cargo msrv verify
