@@ -1,0 +1,76 @@
+name: Checks / Prek
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fast-checks:
+    name: Pre-commit & Formatting
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: https://forgejo.ellis.link/continuwuation/continuwuity/.forgejo/actions/setup-rust@main
+        with:
+          github-token: ${{ secrets.GH_PUBLIC_RO }}
+
+      - name: Run prek
+        run: |
+          prek run \
+            --all-files \
+            --hook-stage manual \
+            --show-diff-on-failure \
+            --color=always \
+            -v
+
+      - name: Check Rust formatting
+        run: |
+          cargo fmt --all -- --check && \
+            echo "✅ Formatting check passed" || \
+            exit 1
+
+  clippy-and-tests:
+    name: Clippy and Cargo Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: https://forgejo.ellis.link/continuwuation/continuwuity/.forgejo/actions/setup-rust@main
+        with:
+          github-token: ${{ secrets.GH_PUBLIC_RO }}
+
+      - name: Run Clippy lints
+        run: |
+          cargo clippy \
+            --workspace \
+            --all-features \
+            --locked \
+            --profile test \
+            --no-deps \
+            -- \
+            -D warnings
+
+      - name: Run Cargo tests
+        run: |
+          cargo test \
+            --workspace \
+            --all-features \
+            --locked \
+            --profile test \
+            --no-fail-fast
