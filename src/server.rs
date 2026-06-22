@@ -154,14 +154,14 @@ enum CacheLookup {
 
 /// Simple cache for Matrix server resolutions with TTL-based expiry.
 #[derive(Clone)]
-pub(crate) struct Cache {
+pub struct Cache {
     inner: Arc<RwLock<HashMap<String, CacheEntry>>>,
     hostname_map: Arc<RwLock<HashMap<String, String>>>, // hostname -> server_name
     ttl: Duration,
 }
 
 impl Cache {
-    fn new(ttl: Duration) -> Self {
+    pub fn new(ttl: Duration) -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
             hostname_map: Arc::new(RwLock::new(HashMap::new())),
@@ -268,7 +268,6 @@ impl Cache {
     }
 }
 
-#[derive(Clone)]
 /// A custom DNS resolver for `reqwest` that handles Matrix server name resolution.
 ///
 /// This resolver integrates with the `MatrixResolver` cache and logic to ensure that
@@ -277,6 +276,7 @@ impl Cache {
 ///
 /// It exists to ensure that the correct SNI is used. The resolver base URL is the
 /// domain expected for SNI, and the `MatrixDnsResolver` resolves it to the correct destination.
+#[derive(Clone)]
 pub struct MatrixDnsResolver {
     resolver: Arc<TokioResolver>,
     cache: Cache,
@@ -358,16 +358,118 @@ pub struct MatrixResolver {
     client: Client,
     resolver: Arc<TokioResolver>,
     cache: Cache,
+    tls_verify: bool,
+}
+
+pub struct MatrixResolverBuilder {
+    client: Option<Client>,
+    resolver: Option<Arc<TokioResolver>>,
+    cache: Option<Cache>,
+    cache_ttl: Duration,
+    tls_verify: bool,
+}
+
+impl Default for MatrixResolverBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl MatrixResolverBuilder {
+    pub fn new() -> MatrixResolverBuilder {
+        MatrixResolverBuilder {
+            client: None,
+            resolver: None,
+            cache: None,
+            cache_ttl: Duration::from_secs(300),
+            tls_verify: true,
+        }
+    }
+
+    pub fn client(mut self, client: Client) -> Self {
+        self.client = Some(client);
+        self
+    }
+    pub fn resolver(mut self, resolver: Arc<TokioResolver>) -> Self {
+        self.resolver = Some(resolver);
+        self
+    }
+    pub fn cache(mut self, cache: Cache) -> Self {
+        self.cache = Some(cache);
+        self
+    }
+    pub fn cache_ttl(mut self, ttl: Duration) -> Self {
+        self.cache_ttl = ttl;
+        self
+    }
+    pub fn tls_verify(mut self, tls_verify: bool) -> Self {
+        self.tls_verify = tls_verify;
+        self
+    }
+
+    /// Create a new `MatrixResolver` with provided options or the default ones.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
+    pub fn build(self) -> Result<MatrixResolver, ResolveServerError> {
+        let client = match self.client {
+            Some(c) => c,
+            None => Client::builder()
+                .timeout(std::time::Duration::from_secs(10))
+                .build()?,
+        };
+
+        let resolver = match self.resolver {
+            Some(resolver) => resolver,
+            None => Arc::new(hickory_resolver::Resolver::builder_tokio()?.build()),
+        };
+
+        let cache = match self.cache {
+            Some(cache) => cache,
+            None => Cache::new(self.cache_ttl),
+        };
+
+        Ok(MatrixResolver {
+            client,
+            resolver,
+            cache,
+            tls_verify: self.tls_verify,
+        })
+    }
 }
 
 impl MatrixResolver {
+    /// Returns a builder object to be used to set additional options
+    ///
+    /// Example
+    ///
+    /// ```rust
+    /// let resolver = MatrixResolver::builder()
+    ///     .cache_ttl(Duration::from_seconds(10))
+    ///     .build();
+    ///
+    /// // Or by directly accessing the builder
+    ///
+    /// let resolver = MatrixResolverBuilder::new()
+    ///     .cache_ttl(Duration::from_seconds(10))
+    ///     .build();
+    /// ```
+    pub fn builder() -> MatrixResolverBuilder {
+        MatrixResolverBuilder::new()
+    }
+
     /// Create a new `MatrixResolver` with default TTL of 5 minutes.
     ///
     /// # Errors
     ///
     /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
+    #[deprecated(
+        since = "0.0.5",
+        note = "please use `MatrixResolverBuilder` and associated methods instead"
+    )]
     pub fn new() -> Result<Self, ResolveServerError> {
-        Self::new_with_ttl(Duration::from_secs(300))
+        MatrixResolverBuilder::new().build()
     }
 
     /// Create a new `MatrixResolver` with a custom cache TTL.
@@ -375,20 +477,12 @@ impl MatrixResolver {
     /// # Errors
     ///
     /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
+    #[deprecated(
+        since = "0.0.5",
+        note = "please use `MatrixResolverBuilder` and associated methods instead"
+    )]
     pub fn new_with_ttl(cache_ttl: Duration) -> Result<Self, ResolveServerError> {
-        let resolver = Arc::new(hickory_resolver::Resolver::builder_tokio()?.build());
-
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(10))
-            .build()?;
-
-        let cache = Cache::new(cache_ttl);
-
-        Ok(MatrixResolver {
-            client,
-            resolver,
-            cache,
-        })
+        MatrixResolverBuilder::new().cache_ttl(cache_ttl).build()
     }
 
     /// Create a client with custom builder that can be reused for all Matrix servers.
