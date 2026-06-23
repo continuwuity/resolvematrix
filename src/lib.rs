@@ -12,13 +12,16 @@
 //! ## Example
 //!
 //! ```rust,no_run
-//! use resolvematrix::server::MatrixResolver;
+//! use resolvematrix::server::{MatrixResolver, MatrixResolverBuilder};
 //! # use std::sync::Arc;
-//!
+//! # use std::time::Duration;
 //! # #[tokio::main]
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!
 //! // Create a new resolver
-//! let resolver = Arc::new(MatrixResolver::new()?);
+//! let resolver = Arc::new(MatrixResolver::new()?)
+//! // Or to use custom options:
+//! let resolver = Arc::new(MatrixResolverBuilder::new().cache_ttl(Duration::from_seconds(10)).build()?);
 //!
 //! // Resolve a server name
 //! let server_name = "matrix.org";

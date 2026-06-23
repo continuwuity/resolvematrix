@@ -8,9 +8,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server_name = "matrix.org";
     let resolution = resolver.resolve_server(server_name).await?;
 
-    // To make a federation request, we need to use a HTTP
+    // To make a federation request, we need to use an HTTP
     // client that has been built by the resolver.
-    let client = resolver.create_client().unwrap();
+    let client = resolver.create_client()?;
 
     // First, we construct the target URL using the base URL
     let url = format!("{}/_matrix/federation/v1/version", resolution.base_url());

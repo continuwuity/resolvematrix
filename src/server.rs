@@ -209,11 +209,11 @@ impl Cache {
             if let Ok(mut cache) = self.inner.write() {
                 cache.remove(hostname);
             }
-            if is_override {
-                return CacheLookup::ExpiredOverride(hostname.to_string());
+            return if is_override {
+                CacheLookup::ExpiredOverride(hostname.to_string())
             } else {
-                return CacheLookup::Miss;
-            }
+                CacheLookup::Miss
+            };
         }
 
         // Try hostname mapping
@@ -409,18 +409,16 @@ impl MatrixResolverBuilder {
     ///
     /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
     pub fn build(self) -> Result<MatrixResolver, ResolveServerError> {
-        let client = self.client.unwrap_or(
-            Client::builder()
-                .timeout(std::time::Duration::from_secs(10))
-                .build()?,
-        );
+        let client = self
+            .client
+            .unwrap_or(Client::builder().timeout(Duration::from_secs(10)).build()?);
 
         let resolver = self.resolver.unwrap_or(Arc::new(
             hickory_resolver::Resolver::builder_tokio()?.build(),
         ));
 
         if self.cache.is_some() && self.cache_ttl.is_some() {
-            tracing::warn!("Cache object provided with cache_ttl; cache_ttl will be ignored");
+            tracing::warn!("Cache and cache_ttl both provided; cache_ttl will be ignored");
         }
         let cache = self.cache.unwrap_or(Cache::new(
             self.cache_ttl.unwrap_or(Duration::from_secs(300)),
@@ -454,15 +452,8 @@ impl MatrixResolver {
         MatrixResolverBuilder::new()
     }
 
-    /// Create a new `MatrixResolver` with default TTL of 5 minutes.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
-    #[deprecated(
-        since = "0.0.5",
-        note = "please use `MatrixResolverBuilder` and associated methods instead"
-    )]
+    /// Create a new `MatrixResolver` with default options. For advanced options, use `MatrixResolverBuilder`
+    /// or `MatrixResolver::builder()` (returns `MatrixResolverBuilder::new()`)
     pub fn new() -> Result<Self, ResolveServerError> {
         MatrixResolverBuilder::new().build()
     }
@@ -504,7 +495,7 @@ impl MatrixResolver {
     ///
     /// Returns an error if the client cannot be built.
     pub fn create_client(self: &Arc<Self>) -> Result<Client, ResolveServerError> {
-        let builder = Client::builder().timeout(std::time::Duration::from_secs(10));
+        let builder = Client::builder().timeout(Duration::from_secs(10));
         self.create_client_with_builder(builder)
     }
 
@@ -592,7 +583,7 @@ impl MatrixResolver {
         // 3. Well-known delegation
         if let Some(res) = self.resolve_well_known(dest).await {
             tracing::info!(?res, step = "well_known", "Resolved .well-known delegation");
-            match res {
+            return match res {
                 WellKnownServerResult::Ip(ip, port) => {
                     tracing::info!(
                         ip = %ip,
@@ -601,10 +592,10 @@ impl MatrixResolver {
                         "Resolved .well-known IP literal"
                     );
                     let socket = SocketAddr::new(ip, port.unwrap_or(8448));
-                    return Ok(Resolution {
+                    Ok(Resolution {
                         destination: ResolvedDestination::Literal(socket),
                         host: dest.to_owned(),
-                    });
+                    })
                 }
                 WellKnownServerResult::Domain(domain, None) => {
                     // 3.3/3.4: Hostname, no port in .well-known
@@ -615,10 +606,10 @@ impl MatrixResolver {
                             step = "well_known_host_srv",
                             "Resolved SRV from .well-known hostname without port"
                         );
-                        return Ok(Resolution {
+                        Ok(Resolution {
                             destination: ResolvedDestination::Named(srv_host, srv_port.to_string()),
                             host: domain,
-                        });
+                        })
                     } else {
                         // 3.5: No SRV, fallback to A/AAAA/CNAME + 8448
                         tracing::trace!(
@@ -626,13 +617,13 @@ impl MatrixResolver {
                             step = "well_known_fallback",
                             "Fallback to .well-known host with default port"
                         );
-                        return Ok(Resolution {
+                        Ok(Resolution {
                             destination: ResolvedDestination::Named(
                                 domain.clone(),
                                 "8448".to_owned(),
                             ),
                             host: domain,
-                        });
+                        })
                     }
                 }
                 WellKnownServerResult::Domain(domain, Some(port)) => {
@@ -642,12 +633,12 @@ impl MatrixResolver {
                         step = "well_known_domain",
                         "Resolved .well-known domain with port"
                     );
-                    return Ok(Resolution {
+                    Ok(Resolution {
                         destination: ResolvedDestination::Named(domain.clone(), port.to_string()),
                         host: domain,
-                    });
+                    })
                 }
-            }
+            };
         }
 
         // 4. SRV lookup on original hostname
@@ -920,7 +911,7 @@ mod tests {
         // Create client with custom DNS resolver
         let builder = Client::builder()
             .tls_danger_accept_invalid_certs(true)
-            .timeout(std::time::Duration::from_secs(10));
+            .timeout(Duration::from_secs(10));
         let client = resolver.create_client_with_builder(builder).unwrap();
 
         // Build URL using the resolution's base_url
@@ -936,7 +927,7 @@ mod tests {
             Ok(resp) => {
                 let status = resp.status();
                 let json: Option<ServerVersionEndpoint> = resp.json().await.ok();
-                tracing::debug!(%status, "Response");
+                debug!(%status, "Response");
 
                 if status == StatusCode::OK {
                     tracing::info!(
@@ -1145,7 +1136,7 @@ mod tests {
         // Create ONE client that will be reused for all servers
         let builder = Client::builder()
             .tls_danger_accept_invalid_certs(true)
-            .timeout(std::time::Duration::from_secs(10));
+            .timeout(Duration::from_secs(10));
         let client = resolver.create_client_with_builder(builder).unwrap();
 
         let servers = vec!["matrix.org", "nexy7574.co.uk", "matrixrooms.info"];
