@@ -329,6 +329,7 @@ impl MatrixResolver {
         if let Some(res) = self.resolve_well_known(dest).await {
             tracing::info!(?res, step = "well_known", "Resolved .well-known delegation");
             return match res {
+                // 3.1: delegated_hostname is an IP literal, optionally with port else default
                 WellKnownServerResult::Ip(ip, port) => {
                     tracing::info!(
                         ip = %ip,
@@ -340,6 +341,19 @@ impl MatrixResolver {
                     Ok(Resolution {
                         destination: ResolvedDestination::Literal(socket),
                         host: dest.to_owned(),
+                    })
+                }
+                // 3.2: Hostname with explicit port in .well-known
+                WellKnownServerResult::Domain(domain, Some(port)) => {
+                    tracing::info!(
+                        domain = %domain,
+                        port = port,
+                        step = "well_known_domain",
+                        "Resolved .well-known domain with port"
+                    );
+                    Ok(Resolution {
+                        destination: ResolvedDestination::Named(domain.clone(), port.to_string()),
+                        host: format!("{domain}:{port}"),
                     })
                 }
                 WellKnownServerResult::Domain(domain, None) => {
@@ -370,18 +384,6 @@ impl MatrixResolver {
                             host: domain,
                         })
                     }
-                }
-                WellKnownServerResult::Domain(domain, Some(port)) => {
-                    tracing::info!(
-                        domain = %domain,
-                        port = port,
-                        step = "well_known_domain",
-                        "Resolved .well-known domain with port"
-                    );
-                    Ok(Resolution {
-                        destination: ResolvedDestination::Named(domain.clone(), port.to_string()),
-                        host: domain,
-                    })
                 }
             };
         }
@@ -803,27 +805,60 @@ pub(crate) mod tests {
 
     /// Run tests against the resolvematrix.dev servers
     #[rstest]
-    #[case::resolvematrix_2_port("2.s.resolvematrix.dev:7652", "2.s.resolvematrix.dev", 7652)] // Explicit port
-    #[case::resolvematrix_3b("3b.s.resolvematrix.dev", "wk.3b.s.resolvematrix.dev", 7753)] // Delegated explicit port
-    #[case::resolvematrix_3c("3c.s.resolvematrix.dev", "srv.wk.3c.s.resolvematrix.dev", 7754)] // Delegated `matrix` SRV
-    #[case::resolvematrix_3d("3d.s.resolvematrix.dev", "wk.3d.s.resolvematrix.dev", 8448)] // Delegated default port
-    #[case::resolvematrix_4("4.s.resolvematrix.dev", "srv.4.s.resolvematrix.dev", 7855)] // `matrix` SRV
-    #[case::resolvematrix_5("5.s.resolvematrix.dev", "5.s.resolvematrix.dev", 8448)] // Default port
-    #[case::resolvematrix_3c_msc4040(
+    #[case::resolvematrix_2( // Explicit port
+        "2.s.resolvematrix.dev:7652",
+        "2.s.resolvematrix.dev",
+        7652,
+        "2.s.resolvematrix.dev:7652"
+    )]
+    #[case::resolvematrix_3b( // Delegated explicit port
+        "3b.s.resolvematrix.dev",
+        "wk.3b.s.resolvematrix.dev",
+        7753,
+        "wk.3b.s.resolvematrix.dev:7753"
+    )]
+    #[case::resolvematrix_3c( // Delegated `matrix` SRV
+        "3c.s.resolvematrix.dev",
+        "srv.wk.3c.s.resolvematrix.dev",
+        7754,
+        "wk.3c.s.resolvematrix.dev"
+    )]
+    #[case::resolvematrix_3d( // Delegated default port
+        "3d.s.resolvematrix.dev",
+        "wk.3d.s.resolvematrix.dev",
+        8448,
+        "wk.3d.s.resolvematrix.dev"
+    )]
+    #[case::resolvematrix_4( // `matrix` SRV
+        "4.s.resolvematrix.dev",
+        "srv.4.s.resolvematrix.dev",
+        7855,
+        "4.s.resolvematrix.dev"
+    )]
+    #[case::resolvematrix_5( // Default port
+        "5.s.resolvematrix.dev",
+        "5.s.resolvematrix.dev",
+        8448,
+        "5.s.resolvematrix.dev"
+    )]
+    #[case::resolvematrix_3c_msc4040( // Delegated `matrix-fed` SRV
         "3c.msc4040.s.resolvematrix.dev",
         "srv.wk.3c.msc4040.s.resolvematrix.dev",
-        7053
-    )] // Delegated `matrix-fed` SRV
-    #[case::resolvematrix_4_msc4040(
+        7053,
+        "wk.3c.msc4040.s.resolvematrix.dev"
+    )]
+    #[case::resolvematrix_4_msc4040(  // `matrix-fed` SRV
         "4.msc4040.s.resolvematrix.dev",
         "srv.4.msc4040.s.resolvematrix.dev",
-        7054
-    )] // `matrix-fed` SRV
+        7054,
+        "4.msc4040.s.resolvematrix.dev"
+    )]
     #[tokio::test]
     async fn test_resolvematrix_suite(
         #[case] input: &str,
-        #[case] expected_host: &str,
+        #[case] expected_hostname: &str,
         #[case] expected_port: u16,
+        #[case] expected_sni: &str,
     ) {
         init_tracing();
 
@@ -834,8 +869,9 @@ pub(crate) mod tests {
         // Resolve server
         let resolution = resolver.resolve_server(input).await.unwrap();
 
-        assert_eq!(resolution.destination.hostname(), expected_host);
+        assert_eq!(resolution.destination.hostname(), expected_hostname);
         assert_eq!(resolution.destination.port(), expected_port);
+        assert_eq!(resolution.host, expected_sni);
     }
 
     /// Demonstrate reuse of the same client across different resolutions
