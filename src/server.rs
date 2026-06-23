@@ -358,15 +358,16 @@ pub struct MatrixResolver {
     client: Client,
     resolver: Arc<TokioResolver>,
     cache: Cache,
-    tls_verify: bool,
 }
 
 pub struct MatrixResolverBuilder {
+    // Objects
     client: Option<Client>,
     resolver: Option<Arc<TokioResolver>>,
     cache: Option<Cache>,
-    cache_ttl: Duration,
-    tls_verify: bool,
+
+    // Options
+    cache_ttl: Option<Duration>,
 }
 
 impl Default for MatrixResolverBuilder {
@@ -381,8 +382,7 @@ impl MatrixResolverBuilder {
             client: None,
             resolver: None,
             cache: None,
-            cache_ttl: Duration::from_secs(300),
-            tls_verify: true,
+            cache_ttl: None,
         }
     }
 
@@ -399,11 +399,7 @@ impl MatrixResolverBuilder {
         self
     }
     pub fn cache_ttl(mut self, ttl: Duration) -> Self {
-        self.cache_ttl = ttl;
-        self
-    }
-    pub fn tls_verify(mut self, tls_verify: bool) -> Self {
-        self.tls_verify = tls_verify;
+        self.cache_ttl = Some(ttl);
         self
     }
 
@@ -413,28 +409,27 @@ impl MatrixResolverBuilder {
     ///
     /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
     pub fn build(self) -> Result<MatrixResolver, ResolveServerError> {
-        let client = match self.client {
-            Some(c) => c,
-            None => Client::builder()
+        let client = self.client.unwrap_or(
+            Client::builder()
                 .timeout(std::time::Duration::from_secs(10))
                 .build()?,
-        };
+        );
 
-        let resolver = match self.resolver {
-            Some(resolver) => resolver,
-            None => Arc::new(hickory_resolver::Resolver::builder_tokio()?.build()),
-        };
+        let resolver = self.resolver.unwrap_or(Arc::new(
+            hickory_resolver::Resolver::builder_tokio()?.build(),
+        ));
 
-        let cache = match self.cache {
-            Some(cache) => cache,
-            None => Cache::new(self.cache_ttl),
-        };
+        if self.cache.is_some() && self.cache_ttl.is_some() {
+            tracing::warn!("Cache object provided with cache_ttl; cache_ttl will be ignored");
+        }
+        let cache = self.cache.unwrap_or(Cache::new(
+            self.cache_ttl.unwrap_or(Duration::from_secs(300)),
+        ));
 
         Ok(MatrixResolver {
             client,
             resolver,
             cache,
-            tls_verify: self.tls_verify,
         })
     }
 }
