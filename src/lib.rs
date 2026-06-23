@@ -19,9 +19,9 @@
 //! # async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!
 //! // Create a new resolver
-//! let resolver = Arc::new(MatrixResolver::new()?)
+//! let resolver = Arc::new(MatrixResolver::new()?);
 //! // Or to use custom options:
-//! let resolver = Arc::new(MatrixResolverBuilder::new().cache_ttl(Duration::from_seconds(10)).build()?);
+//! // MatrixResolverBuilder::new().cache_ttl(Duration::from_secs(10)).build()?
 //!
 //! // Resolve a server name
 //! let server_name = "matrix.org";
@@ -36,5 +36,8 @@
 //! # }
 //! ```
 
+pub mod cache;
+pub mod error;
+pub mod resolution;
 #[cfg(feature = "server")]
 pub mod server;

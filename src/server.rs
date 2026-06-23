@@ -1,272 +1,14 @@
-use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
+use std::time::Duration;
 
+use crate::cache::{Cache, CacheEntry, CacheLookup};
+use crate::error::ResolveServerError;
+use crate::resolution::{Resolution, ResolvedDestination};
 use hickory_resolver::TokioResolver;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
-
-use thiserror::Error;
-
-/// Error type for Matrix server resolution.
-#[derive(Debug, Error)]
-pub enum ResolveServerError {
-    #[error("Failed to parse address: {0}")]
-    AddrParse(#[from] std::net::AddrParseError),
-
-    #[error("HTTP client error: {0}")]
-    Http(#[from] reqwest::Error),
-
-    #[error("DNS resolution error: {0}")]
-    Dns(#[from] hickory_resolver::ResolveError),
-
-    #[error("Invalid port number: {0}")]
-    InvalidPort(#[from] std::num::ParseIntError),
-
-    #[error("Malformed .well-known response")]
-    MalformedWellKnown,
-
-    #[error("Unexpected error: {0}")]
-    Other(String),
-}
-
-/// Represents the resolved destination for a Matrix server.
-#[derive(Debug, Clone)]
-pub enum ResolvedDestination {
-    /// A literal IP address and port (e.g., 1.2.3.4:8448)
-    Literal(SocketAddr),
-    /// A named host and port (e.g., "matrix.org", "8448")
-    Named(String, String),
-}
-
-/// Result of a Matrix server resolution.
-///
-/// Contains the resolved destination (IP/Port or Hostname/Port) and the
-/// hostname to use for SNI/Host headers.
-#[derive(Debug, Clone)]
-pub struct Resolution {
-    /// The actual destination to connect to.
-    pub destination: ResolvedDestination,
-    /// The hostname to use for TLS SNI and HTTP Host header.
-    pub host: String,
-}
-
-impl Resolution {
-    /// Get the base URL for making requests to this resolution.
-    /// Uses the host field for proper SNI.
-    #[must_use]
-    pub fn base_url(&self) -> String {
-        match &self.destination {
-            ResolvedDestination::Literal(addr) => format!("https://{addr}"),
-            ResolvedDestination::Named(_dest_host, dest_port) => {
-                let port: u16 = dest_port.parse().unwrap_or(8448);
-                if self.host.contains(':') {
-                    format!("https://{}", self.host)
-                } else {
-                    format!("https://{}:{}", self.host, port)
-                }
-            }
-        }
-    }
-
-    /// Get the hostname (without port) from the host field for DNS mapping.
-    fn sni_hostname(&self) -> String {
-        if let Some(colon_pos) = self.host.find(':') {
-            self.host[..colon_pos].to_string()
-        } else {
-            self.host.clone()
-        }
-    }
-
-    /// Get the destination address for DNS resolution mapping.
-    async fn destination_addr(&self, resolver: &TokioResolver) -> Option<SocketAddr> {
-        match &self.destination {
-            ResolvedDestination::Literal(addr) => Some(*addr),
-            ResolvedDestination::Named(dest_host, dest_port) => {
-                let port: u16 = dest_port.parse().ok()?;
-
-                // Try to parse as IP first
-                if let Ok(ip) = dest_host.parse::<IpAddr>() {
-                    return Some(SocketAddr::new(ip, port));
-                }
-
-                // Resolve via DNS
-                match resolver.lookup_ip(dest_host.as_str()).await {
-                    Ok(lookup) => {
-                        let ip = lookup.iter().next()?;
-                        Some(SocketAddr::new(ip, port))
-                    }
-                    Err(_) => None,
-                }
-            }
-        }
-    }
-}
-
-impl ResolvedDestination {
-    /// Get the destination hostname
-    pub fn hostname(&self) -> String {
-        match &self {
-            ResolvedDestination::Literal(addr) => addr.ip().to_string(),
-            ResolvedDestination::Named(dest_host, _dest_port) => dest_host.clone(),
-        }
-    }
-
-    /// Get the destination port
-    pub fn port(&self) -> u16 {
-        match &self {
-            ResolvedDestination::Literal(addr) => addr.port(),
-            ResolvedDestination::Named(_dest_host, dest_port) => {
-                dest_port.parse::<u16>().unwrap_or(8448)
-            }
-        }
-    }
-
-    /// Return the host:port formatted string of the resolved destination server (not SNI host)
-    pub fn host_port(&self) -> String {
-        match &self {
-            ResolvedDestination::Literal(addr) => addr.to_string(),
-            ResolvedDestination::Named(host, port) => format!("{host}:{port}"),
-        }
-    }
-}
-
-/// Simple cache entry with expiry time.
-#[derive(Clone, Debug)]
-pub struct CacheEntry {
-    resolution: Resolution,
-    expires_at: Instant,
-    is_override: bool, // If true, this is a Matrix resolution that should be refetched when expired
-}
-
-/// Result of a cache lookup.
-#[derive(Debug)]
-enum CacheLookup {
-    /// Valid cached entry found
-    Valid(Resolution),
-    /// Expired Matrix override - should refetch via Matrix resolution
-    ExpiredOverride(String), // Returns the hostname that needs refetching
-    /// No entry found or expired non-override
-    Miss,
-}
-
-/// Simple cache for Matrix server resolutions with TTL-based expiry.
-#[derive(Clone)]
-pub struct Cache {
-    inner: Arc<RwLock<HashMap<String, CacheEntry>>>,
-    hostname_map: Arc<RwLock<HashMap<String, String>>>, // hostname -> server_name
-    ttl: Duration,
-}
-
-impl Cache {
-    pub fn new(ttl: Duration) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(HashMap::new())),
-            hostname_map: Arc::new(RwLock::new(HashMap::new())),
-            ttl,
-        }
-    }
-
-    fn get(&self, server_name: &str) -> Option<Resolution> {
-        // First try read lock to check if entry exists and is valid
-        if let Ok(cache) = self.inner.read()
-            && let Some(entry) = cache.get(server_name)
-            && Instant::now() < entry.expires_at
-        {
-            return Some(entry.resolution.clone());
-        }
-
-        // If expired or not found, acquire write lock to remove expired entry
-        if let Ok(mut cache) = self.inner.write()
-            && let Some(entry) = cache.get(server_name)
-            && Instant::now() >= entry.expires_at
-        {
-            cache.remove(server_name);
-        }
-        None
-    }
-
-    fn lookup(&self, hostname: &str) -> CacheLookup {
-        // Try direct lookup first with read lock
-        let lookup_result = if let Ok(cache) = self.inner.read() {
-            if let Some(entry) = cache.get(hostname) {
-                if Instant::now() < entry.expires_at {
-                    return CacheLookup::Valid(entry.resolution.clone());
-                }
-                // Entry exists but is expired
-                Some(entry.is_override)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
-
-        // If we found an expired entry, remove it with write lock
-        if let Some(is_override) = lookup_result {
-            if let Ok(mut cache) = self.inner.write() {
-                cache.remove(hostname);
-            }
-            return if is_override {
-                CacheLookup::ExpiredOverride(hostname.to_string())
-            } else {
-                CacheLookup::Miss
-            };
-        }
-
-        // Try hostname mapping
-        if let Ok(hostname_map) = self.hostname_map.read()
-            && let Some(server_name) = hostname_map.get(hostname)
-        {
-            if let Some(resolution) = self.get(server_name) {
-                return CacheLookup::Valid(resolution);
-            }
-            // If the mapping exists but the server_name entry is expired/missing,
-            // treat it as an expired override
-            return CacheLookup::ExpiredOverride(server_name.clone());
-        }
-
-        CacheLookup::Miss
-    }
-
-    fn set(&self, server_name: String, resolution: &Resolution) {
-        if let Ok(mut cache) = self.inner.write() {
-            cache.insert(
-                server_name.clone(),
-                CacheEntry {
-                    resolution: resolution.clone(),
-                    expires_at: Instant::now() + self.ttl,
-                    is_override: true, // All Matrix resolutions are overrides
-                },
-            );
-
-            // Add hostname mapping for DNS lookups
-            if let Ok(mut hostname_map) = self.hostname_map.write() {
-                let sni_hostname = resolution.sni_hostname();
-                if sni_hostname != server_name {
-                    hostname_map.insert(sni_hostname, server_name);
-                }
-            }
-        }
-    }
-
-    /// Remove a single entry from the cache, returning the previously existing entry if there was one
-    fn remove_entry(&self, server_name: &str) -> Option<CacheEntry> {
-        match self.inner.write() {
-            Ok(mut cache) => cache.remove(server_name),
-            Err(_) => None,
-        }
-    }
-
-    /// Clear all cache entries. Returns nothing.
-    fn clear(&self) {
-        if let Ok(mut cache) = self.inner.write() {
-            cache.clear();
-        }
-    }
-}
 
 /// A custom DNS resolver for `reqwest` that handles Matrix server name resolution.
 ///
@@ -353,13 +95,6 @@ impl reqwest::dns::Resolve for MatrixDnsResolver {
     }
 }
 
-/// The main resolver struct for Matrix server resolution.
-pub struct MatrixResolver {
-    client: Client,
-    resolver: Arc<TokioResolver>,
-    cache: Cache,
-}
-
 pub struct MatrixResolverBuilder {
     // Objects
     client: Option<Client>,
@@ -432,20 +167,28 @@ impl MatrixResolverBuilder {
     }
 }
 
+/// The main resolver struct for Matrix server resolution.
+pub struct MatrixResolver {
+    client: Client,
+    resolver: Arc<TokioResolver>,
+    cache: Cache,
+}
+
 impl MatrixResolver {
     /// Returns a builder object to be used to set additional options
     ///
     /// Example
     ///
     /// ```rust
+    /// # use std::time::Duration;
+    /// # use resolvematrix::server::{MatrixResolver, MatrixResolverBuilder};
     /// let resolver = MatrixResolver::builder()
-    ///     .cache_ttl(Duration::from_seconds(10))
+    ///     .cache_ttl(Duration::from_secs(10))
     ///     .build();
     ///
     /// // Or by directly accessing the builder
-    ///
     /// let resolver = MatrixResolverBuilder::new()
-    ///     .cache_ttl(Duration::from_seconds(10))
+    ///     .cache_ttl(Duration::from_secs(10))
     ///     .build();
     /// ```
     pub fn builder() -> MatrixResolverBuilder {
@@ -465,7 +208,7 @@ impl MatrixResolver {
     /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
     #[deprecated(
         since = "0.0.5",
-        note = "please use `MatrixResolverBuilder` and associated methods instead"
+        note = "use `MatrixResolverBuilder::new().cache_ttl(Duration).build()` instead"
     )]
     pub fn new_with_ttl(cache_ttl: Duration) -> Result<Self, ResolveServerError> {
         MatrixResolverBuilder::new().cache_ttl(cache_ttl).build()
@@ -706,13 +449,28 @@ impl MatrixResolver {
             );
             return Some(WellKnownServerResult::Ip(ip, port));
         }
-        let (host, port) = parse_server_name(&wk.m_server);
+        let (host, port) = Self::parse_server_name(&wk.m_server);
         tracing::trace!(
             well_known_host = %host,
             well_known_port = ?port,
             "Parsed .well-known matrix server domain"
         );
         Some(WellKnownServerResult::Domain(host, port))
+    }
+
+    /// Parses a Matrix server name into `(hostname, Option<port>)`
+    #[tracing::instrument(
+        name = "parse_server_name",
+        level = "trace",
+        fields(server_name = %server_name)
+    )]
+    pub(crate) fn parse_server_name(server_name: &str) -> (String, Option<u16>) {
+        if let Some((host, port)) = server_name.rsplit_once(':')
+            && let Ok(port) = u16::from_str(port)
+        {
+            return (host.to_string(), Some(port));
+        }
+        (server_name.to_string(), None)
     }
 
     /// Query SRV records for a hostname, returning (target, port) if found.
@@ -767,21 +525,6 @@ enum WellKnownServerResult {
     Domain(String, Option<u16>),
 }
 
-/// Parses a Matrix server name into (hostname, Option<port>)
-#[tracing::instrument(
-    name = "parse_server_name",
-    level = "trace",
-    fields(server_name = %server_name)
-)]
-fn parse_server_name(server_name: &str) -> (String, Option<u16>) {
-    if let Some((host, port)) = server_name.rsplit_once(':')
-        && let Ok(port) = u16::from_str(port)
-    {
-        return (host.to_string(), Some(port));
-    }
-    (server_name.to_string(), None)
-}
-
 /// If the string is an IP literal (with optional port), returns (`IpAddr`, port).
 #[tracing::instrument(
     name = "get_ip_with_port",
@@ -812,54 +555,15 @@ fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
 }
 
 #[cfg(test)]
-mod tests {
-    use assertables::{assert_none, assert_some};
+pub(crate) mod tests {
     use rstest::rstest;
     use tracing::debug;
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
     use super::*;
 
-    #[test]
-    fn test_get_ip_with_port() {
-        assert_eq!(
-            get_ip_with_port("127.0.0.1:8080"),
-            Some((IpAddr::from([127, 0, 0, 1]), Some(8080)))
-        );
-        assert_eq!(
-            get_ip_with_port("[::1]:8080"),
-            Some((IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), Some(8080)))
-        );
-        assert_eq!(
-            get_ip_with_port("127.0.0.1"),
-            Some((IpAddr::from([127, 0, 0, 1]), None))
-        );
-        assert_eq!(
-            get_ip_with_port("::1"),
-            Some((IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), None))
-        );
-        assert_eq!(get_ip_with_port("example.com"), None);
-    }
-
-    #[test]
-    fn test_get_ip_with_port_invalid() {
-        assert_eq!(get_ip_with_port("invalid"), None);
-        assert_eq!(get_ip_with_port("127.0.0.1:invalid"), None);
-        assert_eq!(get_ip_with_port("::1:invalid"), None);
-        assert_eq!(get_ip_with_port("127.0.0.1:8080:invalid"), None);
-        assert_eq!(get_ip_with_port("::1:8080:invalid"), None);
-    }
-
-    #[tokio::test]
-    async fn test_resolve() {
-        init_tracing();
-        let resolver = MatrixResolver::new().unwrap();
-        let _ = dbg!(resolver.resolve_server("matrix.org").await.unwrap());
-        let _ = dbg!(resolver.resolve_server("ellis.link").await.unwrap());
-    }
-
     /// Helper function to initialize tracing for tests
-    fn init_tracing() {
+    pub(crate) fn init_tracing() {
         let _ = tracing_subscriber::registry()
             .with(
                 tracing_subscriber::fmt::layer()
@@ -869,7 +573,25 @@ mod tests {
             .try_init();
     }
 
-    #[allow(dead_code)]
+    /// Test IP literal detection with parameterized cases
+    #[rstest]
+    #[case::ipv4_port("127.0.0.1:8080", Some((IpAddr::from([127, 0, 0, 1]), Some(8080))))]
+    #[case::ipv4_no_port("127.0.0.1", Some((IpAddr::from([127, 0, 0, 1]), None)))]
+    #[case::ipv4_invalid_port("127.0.0.1:invalid", None)]
+    #[case::ipv4_multiple_port("127.0.0.1:8080:invalid", None)]
+    #[case::ipv6_port("[::1]:8080", Some((IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), Some(8080))))]
+    #[case::ipv6_no_port("::1", Some((IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), None)))]
+    #[case::ipv6_invalid_port("[::1]:invalid", None)]
+    #[case::ipv6_multiple_ports("[::1]:8080:invalid", None)]
+    #[case::ipv6_invalid_addr("::1:8080:invalid", None)]
+    #[case::hostname("example.com", None)]
+    #[case::hostname_with_port("example.com:8448", None)]
+    #[case::invalid("not-an-ip", None)]
+    fn test_get_ip_with_port(#[case] input: &str, #[case] expected: Option<(IpAddr, Option<u16>)>) {
+        assert_eq!(get_ip_with_port(input), expected);
+    }
+
+    #[allow(dead_code)] // Used as part of JSON later on, where entire JSON structure is printed to console for test
     #[derive(Deserialize, Debug)]
     struct ServerVersionEndpoint {
         pub server: ServerVersionServer,
@@ -884,6 +606,7 @@ mod tests {
 
     /// Parameterized test for server resolution.
     #[rstest]
+    #[tokio::test]
     #[case::maunium_net("maunium.net")]
     #[case::timedout_uk_port("timedout.uk:69")]
     #[case::nexy7574_co_uk("nexy7574.co.uk")]
@@ -897,7 +620,6 @@ mod tests {
     #[case::resolvematrix_5("5.s.resolvematrix.dev")]
     #[case::resolvematrix_3c_msc4040("3c.msc4040.s.resolvematrix.dev")]
     #[case::resolvematrix_4_msc4040("4.msc4040.s.resolvematrix.dev")]
-    #[tokio::test]
     async fn test_server_resolver(#[case] server_name: &str) {
         init_tracing();
 
@@ -906,7 +628,7 @@ mod tests {
         tracing::info!("Testing {server_name}");
 
         // Resolve server
-        let resolution = resolver.resolve_server(server_name).await.unwrap();
+        let resolution = dbg!(resolver.resolve_server(server_name).await.unwrap());
 
         // Create client with custom DNS resolver
         let builder = Client::builder()
@@ -957,32 +679,16 @@ mod tests {
         #[case] expected_host: &str,
         #[case] expected_port: Option<u16>,
     ) {
-        let (host, port) = parse_server_name(input);
+        let (host, port) = MatrixResolver::parse_server_name(input);
         assert_eq!(host, expected_host);
         assert_eq!(port, expected_port);
     }
 
-    /// Test IP literal detection with parameterized cases
-    #[rstest]
-    #[case::ipv4_with_port("127.0.0.1:8080", Some((IpAddr::from([127, 0, 0, 1]), Some(8080))))]
-    #[case::ipv4_no_port("127.0.0.1", Some((IpAddr::from([127, 0, 0, 1]), None)))]
-    #[case::ipv6_with_port("[::1]:8080", Some((IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), Some(8080))))]
-    #[case::ipv6_no_port("::1", Some((IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), None)))]
-    #[case::hostname("example.com", None)]
-    #[case::hostname_with_port("example.com:8448", None)]
-    #[case::invalid("not-an-ip", None)]
-    fn test_get_ip_with_port_parameterized(
-        #[case] input: &str,
-        #[case] expected: Option<(IpAddr, Option<u16>)>,
-    ) {
-        assert_eq!(get_ip_with_port(input), expected);
-    }
-
     /// Test resolution of well-known servers
     #[rstest]
+    #[tokio::test]
     #[case::maunium("maunium.net")]
     #[case::nexy("nexy7574.co.uk")]
-    #[tokio::test]
     async fn test_well_known_resolution(#[case] server_name: &str) {
         init_tracing();
 
@@ -1092,6 +798,7 @@ mod tests {
         }
     }
 
+    /// Run tests against the resolvematrix.dev servers
     #[rstest]
     #[case::resolvematrix_2_port("2.s.resolvematrix.dev:7652", "2.s.resolvematrix.dev", 7652)] // Explicit port
     #[case::resolvematrix_3b("3b.s.resolvematrix.dev", "wk.3b.s.resolvematrix.dev", 7753)] // Delegated explicit port
@@ -1110,7 +817,7 @@ mod tests {
         7054
     )] // `matrix-fed` SRV
     #[tokio::test]
-    async fn test_resolvematrix(
+    async fn test_resolvematrix_suite(
         #[case] input: &str,
         #[case] expected_host: &str,
         #[case] expected_port: u16,
@@ -1166,85 +873,5 @@ mod tests {
                 }
             }
         }
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_cache_remove_entry() {
-        init_tracing();
-
-        // Setup code
-        let cache = Cache::new(Duration::from_secs(300));
-
-        let server1_name = "matrix.org";
-        let server1_resolution = Resolution {
-            destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
-            host: String::from(server1_name),
-        };
-
-        let server2_name = "example.com";
-        let server2_resolution = Resolution {
-            destination: ResolvedDestination::Named("example.com".to_string(), "8448".to_string()),
-            host: String::from(server2_name),
-        };
-
-        cache.set(String::from(server1_name), &server1_resolution);
-        cache.set(String::from(server2_name), &server2_resolution);
-
-        // Actual test
-        let server1_removed = cache.remove_entry(server1_name);
-        assert_some!(&server1_removed);
-
-        // Ensure data of removed object matches what was put in originally
-        let server1_removed_unwrapped = server1_removed.unwrap();
-        assert_eq!(
-            server1_removed_unwrapped.resolution.host,
-            server1_resolution.host
-        );
-        assert_eq!(
-            server1_removed_unwrapped.resolution.base_url(),
-            server1_resolution.base_url()
-        );
-
-        // Check that trying to access the removed cache entry gives us None
-        let server1_check_actually_removed = cache.remove_entry(server1_name);
-        assert_none!(server1_check_actually_removed);
-
-        // Query server2 to ensure it still exists
-        let server2_queried = cache.get(server2_name);
-        assert_some!(server2_queried);
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_cache_clear() {
-        init_tracing();
-
-        // Setup code
-        let cache = Cache::new(Duration::from_secs(300));
-
-        let server1_name = "matrix.org";
-        let server1_resolution = Resolution {
-            destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
-            host: String::from(server1_name),
-        };
-
-        let server2_name = "example.com";
-        let server2_resolution = Resolution {
-            destination: ResolvedDestination::Named("example.com".to_string(), "8448".to_string()),
-            host: String::from(server2_name),
-        };
-
-        cache.set(String::from(server1_name), &server1_resolution);
-        cache.set(String::from(server2_name), &server2_resolution);
-
-        // Actual test
-        cache.clear();
-
-        // Query servers to ensure they are actually gone
-        let server1_queried = cache.get(server1_name);
-        let server2_queried = cache.get(server2_name);
-        assert_none!(server1_queried);
-        assert_none!(server2_queried);
     }
 }
