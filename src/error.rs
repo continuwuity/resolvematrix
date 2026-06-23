@@ -18,6 +18,12 @@ pub enum ResolveServerError {
     #[error("Invalid builder options: {0}")]
     InvalidBuilderOptions(String),
 
+    #[error("Invalid UTF-8 data")]
+    InvalidUtf8(#[from] std::string::FromUtf8Error),
+
+    #[error("Response .well-known too large")]
+    WellKnownTooLarge,
+
     #[error("Unexpected error: {0}")]
     Other(String),
 }

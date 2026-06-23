@@ -6,10 +6,13 @@ use std::time::Duration;
 use crate::cache::{Cache, CacheEntry, CacheLookup};
 use crate::error::ResolveServerError;
 use crate::resolution::{Resolution, ResolvedDestination};
+use futures::StreamExt;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::proto::rr::RData;
+use num_traits::ToPrimitive;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
+use serde_json;
 
 /// A custom DNS resolver for `reqwest` that handles Matrix server name resolution.
 ///
@@ -104,6 +107,7 @@ pub struct MatrixResolverBuilder {
 
     // Options
     cache_ttl: Option<Duration>,
+    dangerous_tls_accept_invalid_certs: bool,
 }
 
 impl Default for MatrixResolverBuilder {
@@ -119,6 +123,7 @@ impl MatrixResolverBuilder {
             dns_resolver: None,
             resolution_cache: None,
             cache_ttl: None,
+            dangerous_tls_accept_invalid_certs: false,
         }
     }
 
@@ -138,6 +143,10 @@ impl MatrixResolverBuilder {
         self.cache_ttl = Some(ttl);
         self
     }
+    pub fn dangerous_tls_accept_invalid_certs(mut self, accept_invalid: bool) -> Self {
+        self.dangerous_tls_accept_invalid_certs = accept_invalid;
+        self
+    }
 
     /// Create a new `MatrixResolver` with provided options or the default ones.
     ///
@@ -145,9 +154,12 @@ impl MatrixResolverBuilder {
     ///
     /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
     pub fn build(self) -> Result<MatrixResolver, ResolveServerError> {
-        let client = self
-            .http_client
-            .unwrap_or(Client::builder().timeout(Duration::from_secs(10)).build()?);
+        let client = self.http_client.unwrap_or(
+            Client::builder()
+                .tls_danger_accept_invalid_certs(!self.dangerous_tls_accept_invalid_certs)
+                .timeout(Duration::from_secs(10))
+                .build()?,
+        );
 
         let resolver = self.dns_resolver.unwrap_or(Arc::new(
             hickory_resolver::Resolver::builder_tokio()?.build()?,
@@ -427,6 +439,7 @@ impl MatrixResolver {
             #[serde(rename = "m.server")]
             m_server: String,
         }
+
         let url = format!("https://{hostname}/.well-known/matrix/server");
         tracing::trace!(url = %url, "Fetching .well-known matrix server");
         let Ok(resp) = self.client.get(&url).send().await else {
@@ -435,7 +448,12 @@ impl MatrixResolver {
         if resp.status() != StatusCode::OK {
             return None;
         }
-        let wk: WellKnown = match resp.json().await {
+
+        let json_data = match resp.limit_read().await {
+            Ok(s) => serde_json::from_slice(&s),
+            Err(_) => return None,
+        };
+        let wk: WellKnown = match json_data {
             Ok(wk) => wk,
             Err(e) => {
                 tracing::warn!(
@@ -446,6 +464,7 @@ impl MatrixResolver {
                 return None;
             }
         };
+
         if let Some((ip, port)) = get_ip_with_port(&wk.m_server) {
             tracing::trace!(
                 ip = %ip,
@@ -528,6 +547,47 @@ impl MatrixResolver {
     #[tracing::instrument(level = "trace", skip(self))]
     pub fn clear_cache(&self) {
         self.cache.clear()
+    }
+}
+
+const MAX_WELL_KNOWN_SIZE: u64 = 262_144; // 256 KiB
+
+/// Reads the response body while enforcing a maximum size limit to prevent
+/// memory exhaustion.
+async fn limit_read(response: reqwest::Response) -> Result<Vec<u8>, ResolveServerError> {
+    if response
+        .content_length()
+        .is_some_and(|len| len > MAX_WELL_KNOWN_SIZE)
+    {
+        return Err(ResolveServerError::WellKnownTooLarge);
+    }
+    let mut data = Vec::new();
+    let mut reader = response.bytes_stream();
+
+    while let Some(chunk) = reader.next().await {
+        let chunk = chunk?;
+        data.extend_from_slice(&chunk);
+
+        if data.len()
+            > MAX_WELL_KNOWN_SIZE
+                .to_usize()
+                .expect("max_size must fit in usize")
+        {
+            return Err(ResolveServerError::WellKnownTooLarge);
+        }
+    }
+
+    Ok(data)
+}
+
+#[allow(async_fn_in_trait)]
+pub trait LimitReadExt {
+    async fn limit_read(self) -> Result<Vec<u8>, ResolveServerError>;
+}
+
+impl LimitReadExt for reqwest::Response {
+    async fn limit_read(self) -> Result<Vec<u8>, ResolveServerError> {
+        limit_read(self).await
     }
 }
 
