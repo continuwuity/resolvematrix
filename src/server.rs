@@ -153,7 +153,9 @@ impl MatrixResolverBuilder {
         ));
 
         if self.cache.is_some() && self.cache_ttl.is_some() {
-            tracing::warn!("Cache and cache_ttl both provided; cache_ttl will be ignored");
+            return Err(ResolveServerError::InvalidBuilderOptions(
+                "`cache` and `cache_ttl` are mutually exclusive".to_string(),
+            ));
         }
         let cache = self.cache.unwrap_or(Cache::new(
             self.cache_ttl.unwrap_or(Duration::from_secs(300)),
@@ -179,7 +181,7 @@ impl MatrixResolver {
     ///
     /// Example
     ///
-    /// ```rust
+    /// ```rust,no_run
     /// # use std::time::Duration;
     /// # use resolvematrix::server::{MatrixResolver, MatrixResolverBuilder};
     /// let resolver = MatrixResolver::builder()
@@ -556,11 +558,10 @@ fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use super::*;
     use rstest::rstest;
     use tracing::debug;
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-    use super::*;
 
     /// Helper function to initialize tracing for tests
     pub(crate) fn init_tracing() {
@@ -679,6 +680,8 @@ pub(crate) mod tests {
         #[case] expected_host: &str,
         #[case] expected_port: Option<u16>,
     ) {
+        init_tracing();
+
         let (host, port) = MatrixResolver::parse_server_name(input);
         assert_eq!(host, expected_host);
         assert_eq!(port, expected_port);
@@ -822,6 +825,8 @@ pub(crate) mod tests {
         #[case] expected_host: &str,
         #[case] expected_port: u16,
     ) {
+        init_tracing();
+
         let resolver = Arc::new(MatrixResolver::new().unwrap());
 
         tracing::info!("Testing {input}");
@@ -873,5 +878,38 @@ pub(crate) mod tests {
                 }
             }
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_builder() {
+        init_tracing();
+
+        let client = Client::builder().build().unwrap();
+        let dns_resolver = Arc::new(hickory_resolver::Resolver::builder_tokio().unwrap().build());
+        let cache = Cache::new(Duration::from_secs(10));
+
+        let resolver = MatrixResolverBuilder::new()
+            .client(client)
+            .resolver(dns_resolver)
+            .cache(cache)
+            .build();
+
+        assert!(resolver.is_ok());
+
+        let ttl_resolver = MatrixResolverBuilder::new()
+            .cache_ttl(Duration::from_secs(69))
+            .build()
+            .unwrap();
+        assert_eq!(ttl_resolver.cache.ttl, Duration::from_secs(69));
+
+        let cache2 = Cache::new(Duration::from_secs(10));
+        assert!(
+            MatrixResolverBuilder::new()
+                .cache(cache2)
+                .cache_ttl(Duration::from_secs(69))
+                .build()
+                .is_err()
+        );
     }
 }

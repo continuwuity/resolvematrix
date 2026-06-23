@@ -27,7 +27,7 @@ pub enum CacheLookup {
 pub struct Cache {
     inner: Arc<RwLock<HashMap<String, CacheEntry>>>,
     hostname_map: Arc<RwLock<HashMap<String, String>>>, // hostname -> server_name
-    ttl: Duration,
+    pub(crate) ttl: Duration,
 }
 
 impl Cache {

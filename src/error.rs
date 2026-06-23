@@ -15,6 +15,9 @@ pub enum ResolveServerError {
     #[error("Invalid port number: {0}")]
     InvalidPort(#[from] std::num::ParseIntError),
 
+    #[error("Invalid builder options: {0}")]
+    InvalidBuilderOptions(String),
+
     #[error("Unexpected error: {0}")]
     Other(String),
 }
