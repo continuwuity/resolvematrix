@@ -39,5 +39,4 @@
 pub mod cache;
 pub mod error;
 pub mod resolution;
-#[cfg(feature = "server")]
 pub mod server;
