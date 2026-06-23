@@ -97,9 +97,9 @@ impl reqwest::dns::Resolve for MatrixDnsResolver {
 
 pub struct MatrixResolverBuilder {
     // Objects
-    client: Option<Client>,
-    resolver: Option<Arc<TokioResolver>>,
-    cache: Option<Cache>,
+    http_client: Option<Client>,
+    dns_resolver: Option<Arc<TokioResolver>>,
+    resolution_cache: Option<Cache>,
 
     // Options
     cache_ttl: Option<Duration>,
@@ -114,23 +114,23 @@ impl Default for MatrixResolverBuilder {
 impl MatrixResolverBuilder {
     pub fn new() -> MatrixResolverBuilder {
         MatrixResolverBuilder {
-            client: None,
-            resolver: None,
-            cache: None,
+            http_client: None,
+            dns_resolver: None,
+            resolution_cache: None,
             cache_ttl: None,
         }
     }
 
-    pub fn client(mut self, client: Client) -> Self {
-        self.client = Some(client);
+    pub fn http_client(mut self, client: Client) -> Self {
+        self.http_client = Some(client);
         self
     }
-    pub fn resolver(mut self, resolver: Arc<TokioResolver>) -> Self {
-        self.resolver = Some(resolver);
+    pub fn dns_resolver(mut self, resolver: Arc<TokioResolver>) -> Self {
+        self.dns_resolver = Some(resolver);
         self
     }
-    pub fn cache(mut self, cache: Cache) -> Self {
-        self.cache = Some(cache);
+    pub fn resolution_cache(mut self, cache: Cache) -> Self {
+        self.resolution_cache = Some(cache);
         self
     }
     pub fn cache_ttl(mut self, ttl: Duration) -> Self {
@@ -145,19 +145,19 @@ impl MatrixResolverBuilder {
     /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
     pub fn build(self) -> Result<MatrixResolver, ResolveServerError> {
         let client = self
-            .client
+            .http_client
             .unwrap_or(Client::builder().timeout(Duration::from_secs(10)).build()?);
 
-        let resolver = self.resolver.unwrap_or(Arc::new(
+        let resolver = self.dns_resolver.unwrap_or(Arc::new(
             hickory_resolver::Resolver::builder_tokio()?.build(),
         ));
 
-        if self.cache.is_some() && self.cache_ttl.is_some() {
+        if self.resolution_cache.is_some() && self.cache_ttl.is_some() {
             return Err(ResolveServerError::InvalidBuilderOptions(
-                "`cache` and `cache_ttl` are mutually exclusive".to_string(),
+                "`resolution_cache` and `cache_ttl` are mutually exclusive".to_string(),
             ));
         }
-        let cache = self.cache.unwrap_or(Cache::new(
+        let cache = self.resolution_cache.unwrap_or(Cache::new(
             self.cache_ttl.unwrap_or(Duration::from_secs(300)),
         ));
 
@@ -890,9 +890,9 @@ pub(crate) mod tests {
         let cache = Cache::new(Duration::from_secs(10));
 
         let resolver = MatrixResolverBuilder::new()
-            .client(client)
-            .resolver(dns_resolver)
-            .cache(cache)
+            .http_client(client)
+            .dns_resolver(dns_resolver)
+            .resolution_cache(cache)
             .build();
 
         assert!(resolver.is_ok());
@@ -906,7 +906,7 @@ pub(crate) mod tests {
         let cache2 = Cache::new(Duration::from_secs(10));
         assert!(
             MatrixResolverBuilder::new()
-                .cache(cache2)
+                .resolution_cache(cache2)
                 .cache_ttl(Duration::from_secs(69))
                 .build()
                 .is_err()
