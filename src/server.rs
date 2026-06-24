@@ -212,6 +212,10 @@ impl MatrixResolver {
 
     /// Create a new `MatrixResolver` with default options. For advanced options, use `MatrixResolverBuilder`
     /// or `MatrixResolver::builder()` (returns `MatrixResolverBuilder::new()`)
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the resolver fails to build. See also `MatrixResolverBuilder.build()`.
     pub fn new() -> Result<Self, ResolveServerError> {
         MatrixResolverBuilder::new().build()
     }
@@ -566,42 +570,38 @@ impl MatrixResolver {
 
 pub const MAX_WELL_KNOWN_SIZE: u64 = 262_144; // 256 KiB
 
-/// Reads the response body while enforcing a maximum size limit to prevent
-/// memory exhaustion.
-async fn limit_read(response: reqwest::Response) -> Result<Vec<u8>, ResolveServerError> {
-    if response
-        .content_length()
-        .is_some_and(|len| len > MAX_WELL_KNOWN_SIZE)
-    {
-        return Err(ResolveServerError::WellKnownTooLarge);
-    }
-    let mut data = Vec::new();
-    let mut reader = response.bytes_stream();
-
-    while let Some(chunk) = reader.next().await {
-        let chunk = chunk?;
-        data.extend_from_slice(&chunk);
-
-        if data.len()
-            > MAX_WELL_KNOWN_SIZE
-                .to_usize()
-                .expect("max_size must fit in usize")
-        {
-            return Err(ResolveServerError::WellKnownTooLarge);
-        }
-    }
-
-    Ok(data)
-}
-
 #[allow(async_fn_in_trait)]
 pub trait LimitReadExt {
+    /// Reads the response body while enforcing a maximum size limit to prevent
+    /// memory exhaustion.
     async fn limit_read(self) -> Result<Vec<u8>, ResolveServerError>;
 }
 
 impl LimitReadExt for reqwest::Response {
     async fn limit_read(self) -> Result<Vec<u8>, ResolveServerError> {
-        limit_read(self).await
+        if self
+            .content_length()
+            .is_some_and(|len| len > MAX_WELL_KNOWN_SIZE)
+        {
+            return Err(ResolveServerError::WellKnownTooLarge);
+        }
+        let mut data = Vec::new();
+        let mut reader = self.bytes_stream();
+
+        while let Some(chunk) = reader.next().await {
+            let chunk = chunk?;
+            data.extend_from_slice(&chunk);
+
+            if data.len()
+                > MAX_WELL_KNOWN_SIZE
+                    .to_usize()
+                    .expect("max_size must fit in usize")
+            {
+                return Err(ResolveServerError::WellKnownTooLarge);
+            }
+        }
+
+        Ok(data)
     }
 }
 
