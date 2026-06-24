@@ -156,7 +156,7 @@ impl MatrixResolverBuilder {
     pub fn build(self) -> Result<MatrixResolver, ResolveServerError> {
         let client = self.http_client.unwrap_or(
             Client::builder()
-                .tls_danger_accept_invalid_certs(!self.dangerous_tls_accept_invalid_certs)
+                .tls_danger_accept_invalid_certs(self.dangerous_tls_accept_invalid_certs)
                 .timeout(Duration::from_secs(10))
                 .build()?,
         );
@@ -441,17 +441,31 @@ impl MatrixResolver {
         }
 
         let url = format!("https://{hostname}/.well-known/matrix/server");
-        tracing::trace!(url = %url, "Fetching .well-known matrix server");
+        tracing::trace!(?url, "Fetching .well-known matrix server");
         let Ok(resp) = self.client.get(&url).send().await else {
+            tracing::trace!(?url, "Failed to fetch well-known matrix server");
             return None;
         };
         if resp.status() != StatusCode::OK {
+            tracing::trace!(
+                ?url,
+                status = resp.status().as_u16(),
+                "Response status not 200 when fetching .well-known"
+            );
             return None;
         }
 
         let json_data = match resp.limit_read().await {
             Ok(s) => serde_json::from_slice(&s),
-            Err(_) => return None,
+            Err(error) => {
+                tracing::warn!(
+                    ?error,
+                    ?url,
+                    limit = MAX_WELL_KNOWN_SIZE,
+                    "Well-known response size exceeds maximum"
+                );
+                return None;
+            }
         };
         let wk: WellKnown = match json_data {
             Ok(wk) => wk,
@@ -550,7 +564,7 @@ impl MatrixResolver {
     }
 }
 
-const MAX_WELL_KNOWN_SIZE: u64 = 262_144; // 256 KiB
+pub const MAX_WELL_KNOWN_SIZE: u64 = 262_144; // 256 KiB
 
 /// Reads the response body while enforcing a maximum size limit to prevent
 /// memory exhaustion.
@@ -629,6 +643,9 @@ fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use assertables::{assert_none, assert_some};
+    use httpmock::Method::GET;
+    use httpmock::MockServer;
     use rstest::rstest;
     use tracing::debug;
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
@@ -1020,5 +1037,77 @@ pub(crate) mod tests {
                 .build()
                 .is_err()
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_invalid_well_known() {
+        init_tracing();
+
+        let correct_json_server = MockServer::start();
+        let _correct_json_mock = correct_json_server.mock(|when, then| {
+            when.method(GET).path("/.well-known/matrix/server");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(r#"{"m.server":"localhost:9090"}"#);
+        });
+        let correct_json_server_port = correct_json_server.port();
+        let correct_json_server_address = format!("localhost.localhost:{correct_json_server_port}");
+
+        let broken_json_server = MockServer::start();
+        let _broken_json_mock = broken_json_server.mock(|when, then| {
+            when.method(GET).path("/.well-known/matrix/server");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body("{");
+        });
+        let broken_json_server_port = broken_json_server.port();
+        let broken_json_server_address = format!("localhost.localhost:{broken_json_server_port}");
+
+        let oversize_response_server = MockServer::start();
+        let _oversize_response_mock = oversize_response_server.mock(|when, then| {
+            when.method(GET).path("/.well-known/matrix/server");
+            then.status(200)
+                .header("content-type", "application/json")
+                .body(
+                    (0..(MAX_WELL_KNOWN_SIZE * 2))
+                        .map(|_| "X")
+                        .collect::<String>(),
+                );
+        });
+        let oversize_response_server_port = oversize_response_server.port();
+        let oversize_response_server_address =
+            format!("localhost.localhost:{oversize_response_server_port}");
+
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("failed to initialize aws_lc_rs crypto provider");
+
+        let resolver = Arc::new(
+            MatrixResolverBuilder::new()
+                .dangerous_tls_accept_invalid_certs(true)
+                .build()
+                .unwrap(),
+        );
+
+        let resolved_correct_json = dbg!(
+            resolver
+                .resolve_well_known(correct_json_server_address.as_str())
+                .await
+        );
+        let resolved_broken_json = dbg!(
+            resolver
+                .resolve_well_known(broken_json_server_address.as_str())
+                .await
+        );
+        let resolved_oversize_response = dbg!(
+            resolver
+                .resolve_well_known(oversize_response_server_address.as_str())
+                .await
+        );
+
+        assert_some!(resolved_correct_json);
+        assert_none!(resolved_broken_json);
+        assert_none!(resolved_oversize_response);
     }
 }
