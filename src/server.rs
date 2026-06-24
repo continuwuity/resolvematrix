@@ -446,9 +446,12 @@ impl MatrixResolver {
 
         let url = format!("https://{hostname}/.well-known/matrix/server");
         tracing::trace!(?url, "Fetching .well-known matrix server");
-        let Ok(resp) = self.client.get(&url).send().await else {
-            tracing::trace!(?url, "Failed to fetch well-known matrix server");
-            return None;
+        let resp = match self.client.get(&url).send().await {
+            Ok(resp) => resp,
+            Err(error) => {
+                tracing::trace!(?url, ?error, "Failed to fetch well-known matrix server");
+                return None;
+            }
         };
         if resp.status() != StatusCode::OK {
             tracing::trace!(
