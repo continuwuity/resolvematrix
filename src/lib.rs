@@ -1,9 +1,9 @@
 //! `resolvematrix` is a Rust library providing the ability to resolve Matrix server-to-server endpoints from the server name.
-//! It conforms to the [Server Discovery section in the Matrix specification](https://spec.matrix.org/v1.15/server-server-api/#server-discovery).
+//! It conforms to the [Server discovery chapter of the Matrix specification](https://spec.matrix.org/v1.18/server-server-api/#resolving-server-names).
 //!
-//! The library is tested against the resolvematrix.dev suite and live domains.
+//! The library is tested against the https://resolvematrix.dev suite and other live Matrix servers.
 //!
-//! This library depends on hickory-resolver, reqwest, serde and (indirectly) tokio.
+//! This library depends on `hickory-resolver`, `reqwest`, `serde` and (indirectly) `tokio`.
 //!
 //! # Usage
 //!
@@ -35,6 +35,8 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! For more examples, see the [examples](https://forgejo.ellis.link/continuwuation/resolvematrix/src/branch/main/examples) directory.
 
 pub mod cache;
 pub mod error;
