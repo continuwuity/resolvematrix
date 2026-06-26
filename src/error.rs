@@ -10,7 +10,7 @@ pub enum ResolveServerError {
     Http(#[from] reqwest::Error),
 
     #[error("DNS resolution error: {0}")]
-    Dns(#[from] hickory_resolver::ResolveError),
+    Dns(#[from] hickory_resolver::net::NetError),
 
     #[error("Invalid port number: {0}")]
     InvalidPort(#[from] std::num::ParseIntError),

@@ -112,7 +112,10 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_resolution() {
-        let resolver = hickory_resolver::Resolver::builder_tokio().unwrap().build();
+        let resolver = hickory_resolver::Resolver::builder_tokio()
+            .unwrap()
+            .build()
+            .unwrap();
         let socketaddr = SocketAddr::new(IpAddr::from([127, 0, 0, 1]), 8448);
 
         let literal_ip = Resolution {

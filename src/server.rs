@@ -7,6 +7,7 @@ use crate::cache::{Cache, CacheEntry, CacheLookup};
 use crate::error::ResolveServerError;
 use crate::resolution::{Resolution, ResolvedDestination};
 use hickory_resolver::TokioResolver;
+use hickory_resolver::proto::rr::RData;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 
@@ -149,7 +150,7 @@ impl MatrixResolverBuilder {
             .unwrap_or(Client::builder().timeout(Duration::from_secs(10)).build()?);
 
         let resolver = self.dns_resolver.unwrap_or(Arc::new(
-            hickory_resolver::Resolver::builder_tokio()?.build(),
+            hickory_resolver::Resolver::builder_tokio()?.build()?,
         ));
 
         if self.resolution_cache.is_some() && self.cache_ttl.is_some() {
@@ -495,10 +496,17 @@ impl MatrixResolver {
             tracing::trace!(srv = %srv, "Querying SRV record");
             let lookup = self.resolver.srv_lookup(srv).await;
             if let Ok(result) = lookup
-                && let Some(record) = result.iter().next()
+                && let Some(record) = result
+                    .answers()
+                    .iter()
+                    .filter_map(|record| match &record.data {
+                        RData::SRV(srv) => Some(srv),
+                        _ => None,
+                    })
+                    .next()
             {
-                let target = record.target().to_utf8();
-                let port = record.port();
+                let target = record.target.to_utf8();
+                let port = record.port;
                 return Ok(Some((target.trim_end_matches('.').to_owned(), port)));
             }
         }
@@ -922,7 +930,12 @@ pub(crate) mod tests {
         init_tracing();
 
         let client = Client::builder().build().unwrap();
-        let dns_resolver = Arc::new(hickory_resolver::Resolver::builder_tokio().unwrap().build());
+        let dns_resolver = Arc::new(
+            hickory_resolver::Resolver::builder_tokio()
+                .unwrap()
+                .build()
+                .unwrap(),
+        );
         let cache = Cache::new(Duration::from_secs(10));
 
         let resolver = MatrixResolverBuilder::new()
