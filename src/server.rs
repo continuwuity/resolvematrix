@@ -1055,7 +1055,7 @@ pub(crate) mod tests {
                 .body(r#"{"m.server":"localhost:9090"}"#);
         });
         let correct_json_server_port = correct_json_server.port();
-        let correct_json_server_address = format!("localhost.localhost:{correct_json_server_port}");
+        let correct_json_server_address = format!("localhost:{correct_json_server_port}");
 
         let broken_json_server = MockServer::start();
         let _broken_json_mock = broken_json_server.mock(|when, then| {
@@ -1065,7 +1065,7 @@ pub(crate) mod tests {
                 .body("{");
         });
         let broken_json_server_port = broken_json_server.port();
-        let broken_json_server_address = format!("localhost.localhost:{broken_json_server_port}");
+        let broken_json_server_address = format!("localhost:{broken_json_server_port}");
 
         let oversize_response_server = MockServer::start();
         let _oversize_response_mock = oversize_response_server.mock(|when, then| {
@@ -1079,8 +1079,7 @@ pub(crate) mod tests {
                 );
         });
         let oversize_response_server_port = oversize_response_server.port();
-        let oversize_response_server_address =
-            format!("localhost.localhost:{oversize_response_server_port}");
+        let oversize_response_server_address = format!("localhost:{oversize_response_server_port}");
 
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
