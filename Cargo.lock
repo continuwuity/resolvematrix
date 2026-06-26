@@ -1114,6 +1114,7 @@ version = "0.0.4"
 dependencies = [
  "assertables",
  "hickory-resolver",
+ "parking_lot",
  "reqwest",
  "rstest",
  "serde",

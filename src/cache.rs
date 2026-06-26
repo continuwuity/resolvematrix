@@ -1,6 +1,7 @@
 use crate::resolution::Resolution;
+use parking_lot::RwLock;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// Simple cache entry with expiry time.
@@ -41,7 +42,7 @@ impl Cache {
 
     pub fn get(&self, server_name: &str) -> Option<Resolution> {
         // First try read lock to check if entry exists and is valid
-        if let Ok(cache) = self.inner.read()
+        if let cache = self.inner.read()
             && let Some(entry) = cache.get(server_name)
             && Instant::now() < entry.expires_at
         {
@@ -49,36 +50,36 @@ impl Cache {
         }
 
         // If expired or not found, acquire write lock to remove expired entry
-        if let Ok(mut cache) = self.inner.write()
+        if let mut cache = self.inner.upgradable_read()
             && let Some(entry) = cache.get(server_name)
             && Instant::now() >= entry.expires_at
         {
-            cache.remove(server_name);
+            cache.with_upgraded(|c| c.remove(server_name));
         }
         None
     }
 
     pub fn lookup(&self, hostname: &str) -> CacheLookup {
         // Try direct lookup first with read lock
-        let lookup_result = if let Ok(cache) = self.inner.read() {
-            if let Some(entry) = cache.get(hostname) {
-                if Instant::now() < entry.expires_at {
-                    return CacheLookup::Valid(entry.resolution.clone());
-                }
-                // Entry exists but is expired
-                Some(entry.is_override)
-            } else {
-                None
+        let lookup_result = if let cache = self.inner.read()
+            && let Some(entry) = cache.get(hostname)
+        {
+            if Instant::now() < entry.expires_at {
+                return CacheLookup::Valid(entry.resolution.clone());
             }
+            // Entry exists but is expired
+            Some(entry.is_override)
         } else {
             None
         };
 
+        // TODO: There is a TOCTOU bug here
+
         // If we found an expired entry, remove it with write lock
         if let Some(is_override) = lookup_result {
-            if let Ok(mut cache) = self.inner.write() {
-                cache.remove(hostname);
-            }
+            let mut cache = self.inner.write();
+            cache.remove(hostname);
+
             return if is_override {
                 CacheLookup::ExpiredOverride(hostname.to_string())
             } else {
@@ -87,7 +88,7 @@ impl Cache {
         }
 
         // Try hostname mapping
-        if let Ok(hostname_map) = self.hostname_map.read()
+        if let hostname_map = self.hostname_map.read()
             && let Some(server_name) = hostname_map.get(hostname)
         {
             if let Some(resolution) = self.get(server_name) {
@@ -95,46 +96,41 @@ impl Cache {
             }
             // If the mapping exists but the server_name entry is expired/missing,
             // treat it as an expired override
-            return CacheLookup::ExpiredOverride(server_name.clone());
+            return CacheLookup::ExpiredOverride(server_name.to_string());
         }
 
         CacheLookup::Miss
     }
 
     pub fn set(&self, server_name: String, resolution: &Resolution) {
-        if let Ok(mut cache) = self.inner.write() {
-            cache.insert(
-                server_name.clone(),
-                CacheEntry {
-                    resolution: resolution.clone(),
-                    expires_at: Instant::now() + self.ttl,
-                    is_override: true, // All Matrix resolutions are overrides
-                },
-            );
+        let mut cache = self.inner.write();
+        cache.insert(
+            server_name.clone(),
+            CacheEntry {
+                resolution: resolution.clone(),
+                expires_at: Instant::now() + self.ttl,
+                is_override: true, // All Matrix resolutions are overrides
+            },
+        );
 
-            // Add hostname mapping for DNS lookups
-            if let Ok(mut hostname_map) = self.hostname_map.write() {
-                let sni_hostname = resolution.sni_hostname();
-                if sni_hostname != server_name {
-                    hostname_map.insert(sni_hostname, server_name);
-                }
-            }
+        // Add hostname mapping for DNS lookups
+        let mut hostname_map = self.hostname_map.write();
+        let sni_hostname = resolution.sni_hostname();
+        if sni_hostname != server_name {
+            hostname_map.insert(sni_hostname, server_name);
         }
     }
 
     /// Remove a single entry from the cache, returning the previously existing entry if there was one
     pub fn remove_entry(&self, server_name: &str) -> Option<CacheEntry> {
-        match self.inner.write() {
-            Ok(mut cache) => cache.remove(server_name),
-            Err(_) => None,
-        }
+        let mut cache = self.inner.write();
+        cache.remove(server_name)
     }
 
     /// Clear all cache entries. Returns nothing.
     pub fn clear(&self) {
-        if let Ok(mut cache) = self.inner.write() {
-            cache.clear();
-        }
+        let mut cache = self.inner.write();
+        cache.clear();
     }
 }
 
