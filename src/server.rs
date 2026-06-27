@@ -226,7 +226,7 @@ impl MatrixResolver {
     ///
     /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
     #[deprecated(
-        since = "0.0.5",
+        since = "0.1.0",
         note = "use `MatrixResolverBuilder::new().cache_ttl(Duration).build()` instead"
     )]
     pub fn new_with_ttl(cache_ttl: Duration) -> Result<Self, ResolveServerError> {
