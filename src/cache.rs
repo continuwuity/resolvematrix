@@ -60,27 +60,16 @@ impl Cache {
     }
 
     pub fn lookup(&self, hostname: &str) -> CacheLookup {
-        // Try direct lookup first with read lock
-        let lookup_result = if let cache = self.inner.read()
-            && let Some(entry) = cache.get(hostname)
-        {
+        let mut cache = self.inner.upgradable_read();
+        if let Some(entry) = cache.get(hostname) {
             if Instant::now() < entry.expires_at {
                 return CacheLookup::Valid(entry.resolution.clone());
             }
-            // Entry exists but is expired
-            Some(entry.is_override)
-        } else {
-            None
-        };
 
-        // TODO: There is a TOCTOU bug here
+            let ec = entry.clone(); // Clone and then remove to prevent mutable borrow error
+            cache.with_upgraded(|c| c.remove(hostname));
 
-        // If we found an expired entry, remove it with write lock
-        if let Some(is_override) = lookup_result {
-            let mut cache = self.inner.write();
-            cache.remove(hostname);
-
-            return if is_override {
+            return if ec.is_override {
                 CacheLookup::ExpiredOverride(hostname.to_string())
             } else {
                 CacheLookup::Miss
