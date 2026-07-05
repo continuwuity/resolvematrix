@@ -699,8 +699,8 @@ pub(crate) mod tests {
     #[rstest]
     #[tokio::test]
     #[case::maunium_net("maunium.net")]
-    #[case::timedout_uk_port("timedout.uk:69")]
-    #[case::nexy7574_co_uk("nexy7574.co.uk")]
+    //#[case::timedout_uk_port("timedout.uk:69")] -- disabled because of downtime in relevant server
+    //#[case::nexy7574_co_uk("nexy7574.co.uk")] -- disabled because of downtime in relevant server
     #[case::matrix_org("matrix.org")]
     #[case::matrixrooms_info("matrixrooms.info")]
     #[case::resolvematrix_2_port("2.s.resolvematrix.dev:7652")]
@@ -781,7 +781,7 @@ pub(crate) mod tests {
     #[rstest]
     #[tokio::test]
     #[case::maunium("maunium.net")]
-    #[case::nexy("nexy7574.co.uk")]
+    //#[case::nexy("nexy7574.co.uk")] -- disabled because of downtime in relevant server
     async fn test_well_known_resolution(#[case] server_name: &str) {
         init_tracing();
 
@@ -818,7 +818,7 @@ pub(crate) mod tests {
     /// Test servers with explicit ports
     #[rstest]
     #[case::standard_port("matrix.org:8448")]
-    #[case::custom_port("timedout.uk:69")]
+    //#[case::custom_port("timedout.uk:69")] -- disabled because of downtime in relevant server
     #[case::high_port("test.server:9999")]
     #[tokio::test]
     async fn test_explicit_port_resolution(#[case] server_name: &str) {
@@ -975,7 +975,11 @@ pub(crate) mod tests {
             .timeout(Duration::from_secs(10));
         let client = resolver.create_client_with_builder(builder).unwrap();
 
-        let servers = vec!["matrix.org", "nexy7574.co.uk", "matrixrooms.info"];
+        let servers = vec![
+            "matrix.org",
+            //"nexy7574.co.uk", -- disabled because of downtime in relevant server
+            "matrixrooms.info",
+        ];
 
         for server_name in servers {
             tracing::info!("Testing {server_name} with reused client");
