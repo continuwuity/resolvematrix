@@ -171,7 +171,7 @@ impl MatrixResolverBuilder {
             ));
         }
         let cache = self.resolution_cache.unwrap_or(Cache::new(
-            self.cache_ttl.unwrap_or(Duration::from_secs(300)),
+            self.cache_ttl.unwrap_or(Duration::from_secs(60 * 60 * 24)),
         ));
 
         Ok(MatrixResolver {
