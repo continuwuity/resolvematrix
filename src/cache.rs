@@ -328,4 +328,32 @@ mod tests {
             CacheLookup::Miss
         ));
     }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_all() {
+        // Setup code
+        let cache = Cache::new(Duration::from_secs(300));
+
+        let server1_name = "matrix.org";
+        let server1_resolution = Resolution {
+            destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
+            host: String::from(server1_name),
+            is_override: false,
+        };
+
+        let server2_name = "example.com";
+        let server2_resolution = Resolution {
+            destination: ResolvedDestination::Named("example.com".to_string(), "8448".to_string()),
+            host: String::from(server2_name),
+            is_override: false,
+        };
+
+        cache.set(String::from(server1_name), &server1_resolution);
+        cache.set(String::from(server2_name), &server2_resolution);
+
+        // Actual test
+        let servers = dbg!(cache.get_all());
+        assert_eq!(servers.len(), 2);
+    }
 }
