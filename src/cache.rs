@@ -146,6 +146,12 @@ impl Cache {
         let mut hostname_map = self.hostname_map.write();
         hostname_map.clear();
     }
+
+    /// Return a Vec of every current cache entry
+    pub fn get_all(&self) -> Vec<CacheEntry> {
+        let cache = self.inner.read();
+        cache.values().cloned().collect()
+    }
 }
 
 #[cfg(test)]
