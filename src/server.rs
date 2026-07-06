@@ -581,6 +581,11 @@ impl MatrixResolver {
     pub fn clear_cache(&self) {
         self.cache.clear()
     }
+
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub fn get_all_cache_entries(&self) -> Vec<CacheEntry> {
+        self.cache.get_all()
+    }
 }
 
 pub const MAX_WELL_KNOWN_SIZE: u64 = 262_144; // 256 KiB
