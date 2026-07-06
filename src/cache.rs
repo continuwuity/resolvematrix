@@ -148,9 +148,8 @@ impl Cache {
     }
 
     /// Return a Vec of every current cache entry
-    pub fn get_all(&self) -> Vec<CacheEntry> {
-        let cache = self.inner.read();
-        cache.values().cloned().collect()
+    pub fn get_all(&self) -> Vec<(String, CacheEntry)> {
+        self.inner.read().clone().into_iter().collect()
     }
 }
 

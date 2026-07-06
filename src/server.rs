@@ -583,7 +583,7 @@ impl MatrixResolver {
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
-    pub fn get_all_cache_entries(&self) -> Vec<CacheEntry> {
+    pub fn get_all_cache_entries(&self) -> Vec<(String, CacheEntry)> {
         self.cache.get_all()
     }
 }
