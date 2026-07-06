@@ -2,14 +2,14 @@ use crate::resolution::Resolution;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, SystemTime};
 use tracing::trace;
 
 /// Simple cache entry with expiry time.
 #[derive(Clone, Debug)]
 pub struct CacheEntry {
     pub resolution: Resolution,
-    pub expires_at: Instant,
+    pub expires_at: SystemTime,
     pub is_override: bool,
 }
 
@@ -45,7 +45,7 @@ impl Cache {
         // First try read lock to check if entry exists and is valid
         if let cache = self.inner.read()
             && let Some(entry) = cache.get(server_name)
-            && Instant::now() < entry.expires_at
+            && SystemTime::now() < entry.expires_at
         {
             return Some(entry.resolution.clone());
         }
@@ -53,7 +53,7 @@ impl Cache {
         // If expired or not found, acquire write lock to remove expired entry
         if let mut cache = self.inner.upgradable_read()
             && let Some(entry) = cache.get(server_name)
-            && Instant::now() >= entry.expires_at
+            && SystemTime::now() >= entry.expires_at
         {
             cache.with_upgraded(|c| c.remove(server_name));
         }
@@ -63,7 +63,7 @@ impl Cache {
     pub fn lookup(&self, hostname: &str) -> CacheLookup {
         let mut cache = self.inner.upgradable_read();
         if let Some(entry) = cache.get(hostname) {
-            if Instant::now() < entry.expires_at {
+            if SystemTime::now() < entry.expires_at {
                 return CacheLookup::Valid(entry.resolution.clone());
             }
 
@@ -105,7 +105,7 @@ impl Cache {
                 server_name.clone(),
                 CacheEntry {
                     resolution: resolution.clone(),
-                    expires_at: Instant::now() + self.ttl,
+                    expires_at: SystemTime::now() + self.ttl,
                     is_override,
                 },
             );
