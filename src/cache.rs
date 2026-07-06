@@ -66,10 +66,10 @@ impl Cache {
                 return CacheLookup::Valid(entry.resolution.clone());
             }
 
-            let ec = entry.clone(); // Clone and then remove to prevent mutable borrow error
+            let is_override = entry.is_override; //
             cache.with_upgraded(|c| c.remove(hostname));
 
-            return if ec.is_override {
+            return if is_override {
                 CacheLookup::ExpiredOverride(hostname.to_string())
             } else {
                 CacheLookup::Miss
