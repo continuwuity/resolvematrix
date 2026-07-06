@@ -78,15 +78,18 @@ impl Cache {
         }
 
         // Try hostname mapping
-        if let hostname_map = self.hostname_map.read()
-            && let Some(server_name) = hostname_map.get(hostname)
-        {
-            if let Some(resolution) = self.get(server_name) {
+        let mapped_server_name = {
+            let hostname_map = self.hostname_map.read();
+            hostname_map.get(hostname).cloned()
+        };
+
+        if let Some(server_name) = mapped_server_name {
+            if let Some(resolution) = self.get(&server_name) {
                 return CacheLookup::Valid(resolution);
             }
             // If the mapping exists but the server_name entry is expired/missing,
             // treat it as an expired override
-            return CacheLookup::ExpiredOverride(server_name.to_string());
+            return CacheLookup::ExpiredOverride(server_name);
         }
 
         CacheLookup::Miss
@@ -96,15 +99,17 @@ impl Cache {
         let sni_hostname = resolution.sni_hostname();
         let is_override = resolution.is_override;
 
-        let mut cache = self.inner.write();
-        cache.insert(
-            server_name.clone(),
-            CacheEntry {
-                resolution: resolution.clone(),
-                expires_at: Instant::now() + self.ttl,
-                is_override,
-            },
-        );
+        {
+            let mut cache = self.inner.write();
+            cache.insert(
+                server_name.clone(),
+                CacheEntry {
+                    resolution: resolution.clone(),
+                    expires_at: Instant::now() + self.ttl,
+                    is_override,
+                },
+            );
+        }
         trace!(%server_name, %sni_hostname, resolution = %resolution.destination.hostname(), ?is_override, "setting entry ");
 
         debug_assert!(is_override || (sni_hostname == resolution.destination.hostname()));
@@ -118,14 +123,28 @@ impl Cache {
 
     /// Remove a single entry from the cache, returning the previously existing entry if there was one
     pub fn remove_entry(&self, server_name: &str) -> Option<CacheEntry> {
-        let mut cache = self.inner.write();
-        cache.remove(server_name)
+        let removed = {
+            let mut cache = self.inner.write();
+            cache.remove(server_name)
+        };
+
+        if removed.is_some() {
+            let mut hostname_map = self.hostname_map.write();
+            hostname_map.retain(|_, mapped_server_name| mapped_server_name != server_name);
+        }
+
+        removed
     }
 
     /// Clear all cache entries. Returns nothing.
     pub fn clear(&self) {
-        let mut cache = self.inner.write();
-        cache.clear();
+        {
+            let mut cache = self.inner.write();
+            cache.clear();
+        }
+
+        let mut hostname_map = self.hostname_map.write();
+        hostname_map.clear();
     }
 }
 
@@ -269,5 +288,38 @@ mod tests {
             CacheLookup::Miss => {}
             other => panic!("expected Miss, got {other:?}"),
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn remove_entry_clears_hostname_mapping() {
+        init_tracing();
+
+        let cache = Cache::new(Duration::from_secs(300));
+
+        let server_name = "matrix.org";
+        let resolution = Resolution {
+            destination: ResolvedDestination::Named(
+                "matrix.example.org".to_string(),
+                "8448".to_string(),
+            ),
+            host: String::from("matrix.example.org"),
+            is_override: true,
+        };
+
+        cache.set(String::from(server_name), &resolution);
+
+        assert!(matches!(
+            cache.lookup("matrix.example.org"),
+            CacheLookup::Valid(_)
+        ));
+
+        let removed = cache.remove_entry(server_name);
+        assert_some!(removed);
+
+        assert!(matches!(
+            cache.lookup("matrix.example.org"),
+            CacheLookup::Miss
+        ));
     }
 }
