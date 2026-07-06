@@ -327,6 +327,7 @@ impl MatrixResolver {
             return Ok(Resolution {
                 destination: ResolvedDestination::Literal(socket),
                 host: dest.to_owned(),
+                is_override: false,
             });
         }
 
@@ -343,6 +344,7 @@ impl MatrixResolver {
             return Ok(Resolution {
                 destination: ResolvedDestination::Named(host_part.to_owned(), port_str.to_owned()),
                 host: dest.to_owned(),
+                is_override: false,
             });
         }
 
@@ -362,6 +364,7 @@ impl MatrixResolver {
                     Ok(Resolution {
                         destination: ResolvedDestination::Literal(socket),
                         host: dest.to_owned(),
+                        is_override: false,
                     })
                 }
                 // 3.2: Hostname with explicit port in .well-known
@@ -375,6 +378,7 @@ impl MatrixResolver {
                     Ok(Resolution {
                         destination: ResolvedDestination::Named(domain.clone(), port.to_string()),
                         host: format!("{domain}:{port}"),
+                        is_override: false,
                     })
                 }
                 WellKnownServerResult::Domain(domain, None) => {
@@ -389,6 +393,7 @@ impl MatrixResolver {
                         Ok(Resolution {
                             destination: ResolvedDestination::Named(srv_host, srv_port.to_string()),
                             host: domain,
+                            is_override: true,
                         })
                     } else {
                         // 3.5: No SRV, fallback to A/AAAA/CNAME + 8448
@@ -403,6 +408,7 @@ impl MatrixResolver {
                                 "8448".to_owned(),
                             ),
                             host: domain,
+                            is_override: true,
                         })
                     }
                 }
@@ -420,6 +426,7 @@ impl MatrixResolver {
             return Ok(Resolution {
                 destination: ResolvedDestination::Named(srv_host, srv_port.to_string()),
                 host: dest.to_owned(),
+                is_override: true,
             });
         }
 
@@ -432,6 +439,7 @@ impl MatrixResolver {
         Ok(Resolution {
             destination: ResolvedDestination::Named(dest.to_owned(), "8448".to_owned()),
             host: dest.to_owned(),
+            is_override: false,
         })
     }
 

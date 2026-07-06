@@ -12,6 +12,8 @@ pub struct Resolution {
     /// The hostname to use for TLS SNI and HTTP Host header. May contain a port if the target
     /// has one (e.g. from looking up the resolution for `example.com:9090`).
     pub host: String,
+    /// Whether the resolution requires using `host` as an SNI/Host override.
+    pub is_override: bool,
 }
 
 impl Resolution {
@@ -138,6 +140,7 @@ mod tests {
         let literal_ip = Resolution {
             destination: ResolvedDestination::Literal(socketaddr),
             host: "127.0.0.1".to_string(),
+            is_override: false,
         };
         assert_eq!(
             literal_ip.destination_addrs(&resolver).await,
@@ -156,6 +159,7 @@ mod tests {
                 socketaddr.port().to_string(),
             ),
             host: "127.0.0.1".to_string(),
+            is_override: false,
         };
         assert_eq!(
             named_ip.destination_addrs(&resolver).await,
@@ -168,6 +172,7 @@ mod tests {
         let named_with_port_in_host = Resolution {
             destination: ResolvedDestination::Named("example.com".to_string(), "9090".to_string()),
             host: "example.com:9090".to_string(),
+            is_override: true,
         };
         assert_eq!(
             named_with_port_in_host.base_url(),
@@ -181,6 +186,7 @@ mod tests {
                 "9090".to_string(),
             ),
             host: "testdomain.invalid:9090".to_string(),
+            is_override: true,
         };
         assert_eq!(invalid_dns_address.destination_addr(&resolver).await, None);
     }

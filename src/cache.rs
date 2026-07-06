@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 pub struct CacheEntry {
     pub resolution: Resolution,
     pub expires_at: Instant,
+    pub is_override: bool,
 }
 
 /// Result of a cache lookup.
@@ -65,9 +66,14 @@ impl Cache {
                 return CacheLookup::Valid(entry.resolution.clone());
             }
 
+            let is_override = entry.is_override;
             cache.with_upgraded(|c| c.remove(hostname));
 
-            return CacheLookup::ExpiredOverride(hostname.to_string());
+            return if is_override {
+                CacheLookup::ExpiredOverride(hostname.to_string())
+            } else {
+                CacheLookup::Miss
+            };
         }
 
         // Try hostname mapping
@@ -86,18 +92,21 @@ impl Cache {
     }
 
     pub fn set(&self, server_name: String, resolution: &Resolution) {
+        let sni_hostname = resolution.sni_hostname();
+        let is_override = resolution.is_override;
+
         let mut cache = self.inner.write();
         cache.insert(
             server_name.clone(),
             CacheEntry {
                 resolution: resolution.clone(),
                 expires_at: Instant::now() + self.ttl,
+                is_override,
             },
         );
 
         // Add hostname mapping for DNS lookups
         let mut hostname_map = self.hostname_map.write();
-        let sni_hostname = resolution.sni_hostname();
         if sni_hostname != server_name {
             hostname_map.insert(sni_hostname, server_name);
         }
@@ -137,12 +146,14 @@ mod tests {
         let server1_resolution = Resolution {
             destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
             host: String::from(server1_name),
+            is_override: false,
         };
 
         let server2_name = "example.com";
         let server2_resolution = Resolution {
             destination: ResolvedDestination::Named("example.com".to_string(), "8448".to_string()),
             host: String::from(server2_name),
+            is_override: false,
         };
 
         cache.set(String::from(server1_name), &server1_resolution);
@@ -184,12 +195,14 @@ mod tests {
         let server1_resolution = Resolution {
             destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
             host: String::from(server1_name),
+            is_override: false,
         };
 
         let server2_name = "example.com";
         let server2_resolution = Resolution {
             destination: ResolvedDestination::Named("example.com".to_string(), "8448".to_string()),
             host: String::from(server2_name),
+            is_override: false,
         };
 
         cache.set(String::from(server1_name), &server1_resolution);
@@ -203,5 +216,54 @@ mod tests {
         let server2_queried = cache.get(server2_name);
         assert_none!(server1_queried);
         assert_none!(server2_queried);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn expired_lookup_returns_override() {
+        init_tracing();
+
+        let cache = Cache::new(Duration::from_secs(0));
+
+        let server_name = "example.com";
+        let resolution = Resolution {
+            destination: ResolvedDestination::Named(
+                "example-federation.example.com".to_string(),
+                "8448".to_string(),
+            ),
+            host: String::from("example-federation.example.com"),
+            is_override: true,
+        };
+
+        cache.set(String::from(server_name), &resolution);
+
+        match cache.lookup(server_name) {
+            CacheLookup::ExpiredOverride(expired_name) => {
+                assert_eq!(expired_name, server_name);
+            }
+            other => panic!("expected ExpiredOverride, got {other:?}"),
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn expired_lookup_without_override_is_miss() {
+        init_tracing();
+
+        let cache = Cache::new(Duration::from_secs(0));
+
+        let server_name = "matrix.org";
+        let resolution = Resolution {
+            destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
+            host: String::from(server_name),
+            is_override: false,
+        };
+
+        cache.set(String::from(server_name), &resolution);
+
+        match cache.lookup(server_name) {
+            CacheLookup::Miss => {}
+            other => panic!("expected Miss, got {other:?}"),
+        }
     }
 }
