@@ -654,7 +654,7 @@ pub(crate) mod tests {
     use httpmock::Method::GET;
     use httpmock::MockServer;
     use rstest::rstest;
-    use tracing::debug;
+    use tracing::{debug, level_filters::LevelFilter};
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
     /// Helper function to initialize tracing for tests
@@ -663,7 +663,12 @@ pub(crate) mod tests {
             .with(
                 tracing_subscriber::fmt::layer()
                     .with_test_writer()
-                    .with_target(false),
+                    .with_target(true),
+            )
+            .with(
+                tracing_subscriber::EnvFilter::builder()
+                    .with_default_directive(LevelFilter::TRACE.into())
+                    .from_env_lossy(),
             )
             .try_init();
     }
