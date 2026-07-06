@@ -36,8 +36,16 @@ impl Resolution {
 
     /// Get the hostname (without port) from the host field for DNS mapping.
     pub(crate) fn sni_hostname(&self) -> String {
-        if let Some(colon_pos) = self.host.find(':') {
-            self.host[..colon_pos].to_string()
+        if let Some(host) = self.host.strip_prefix('[')
+            && let Some(bracket_pos) = host.find(']')
+        {
+            return host[..bracket_pos].to_string();
+        }
+
+        if self.host.matches(':').count() == 1
+            && let Some((hostname, _port)) = self.host.rsplit_once(':')
+        {
+            hostname.to_string()
         } else {
             self.host.clone()
         }
@@ -179,6 +187,20 @@ mod tests {
             "https://example.com:9090"
         );
         assert_eq!(named_with_port_in_host.sni_hostname(), "example.com");
+
+        let ipv6_host = Resolution {
+            destination: ResolvedDestination::Literal(socketaddr),
+            host: "[::1]:8448".to_string(),
+            is_override: false,
+        };
+        assert_eq!(ipv6_host.sni_hostname(), "::1");
+
+        let bare_ipv6_host = Resolution {
+            destination: ResolvedDestination::Literal(socketaddr),
+            host: "::1".to_string(),
+            is_override: false,
+        };
+        assert_eq!(bare_ipv6_host.sni_hostname(), "::1");
 
         let invalid_dns_address = Resolution {
             destination: ResolvedDestination::Named(

@@ -3,6 +3,7 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tracing::trace;
 
 /// Simple cache entry with expiry time.
 #[derive(Clone, Debug)]
@@ -104,6 +105,9 @@ impl Cache {
                 is_override,
             },
         );
+        trace!(%server_name, %sni_hostname, resolution = %resolution.destination.hostname(), ?is_override, "setting entry ");
+
+        debug_assert!(is_override || (sni_hostname == resolution.destination.hostname()));
 
         // Add hostname mapping for DNS lookups
         let mut hostname_map = self.hostname_map.write();
