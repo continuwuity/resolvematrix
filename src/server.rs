@@ -55,9 +55,9 @@ impl reqwest::dns::Resolve for MatrixDnsResolver {
             match cache.lookup(&name_str) {
                 CacheLookup::Valid(resolution) => {
                     // Valid cached entry - use it
-                    if let Some(addr) = resolution.destination_addr(&resolver).await {
-                        tracing::trace!("DNS cache hit for {name_str} -> {addr}");
-                        return Ok(Box::new(std::iter::once(addr))
+                    if let Some(addrs) = resolution.destination_addrs(&resolver).await {
+                        tracing::trace!("DNS cache hit for {name_str} -> {addrs:?}");
+                        return Ok(Box::new(addrs.into_iter())
                             as Box<dyn Iterator<Item = SocketAddr> + Send>);
                     }
                 }
@@ -66,8 +66,8 @@ impl reqwest::dns::Resolve for MatrixDnsResolver {
                     tracing::trace!("DNS cache expired override for {name_str}, refetching");
                     match matrix_resolver.resolve_server(&server_name).await {
                         Ok(resolution) => {
-                            if let Some(addr) = resolution.destination_addr(&resolver).await {
-                                return Ok(Box::new(std::iter::once(addr))
+                            if let Some(addrs) = resolution.destination_addrs(&resolver).await {
+                                return Ok(Box::new(addrs.into_iter())
                                     as Box<dyn Iterator<Item = SocketAddr> + Send>);
                             } else {
                                 // Something funky, they should re-resolve the server
@@ -657,6 +657,12 @@ pub(crate) mod tests {
     use tracing::{debug, level_filters::LevelFilter};
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+    fn socket_addrs_from_ips(ips: impl IntoIterator<Item = IpAddr>, port: u16) -> Vec<SocketAddr> {
+        ips.into_iter()
+            .map(|ip| SocketAddr::new(ip, port))
+            .collect()
+    }
+
     /// Helper function to initialize tracing for tests
     pub(crate) fn init_tracing() {
         let _ = tracing_subscriber::registry()
@@ -822,6 +828,25 @@ pub(crate) mod tests {
                 assert!(port_num > 0, "Port should be greater than 0");
             }
         }
+    }
+
+    #[test]
+    fn test_dns_candidate_order_preserved() {
+        let addrs = socket_addrs_from_ips(
+            [
+                IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]),
+                IpAddr::from([127, 0, 0, 1]),
+            ],
+            8448,
+        );
+
+        assert_eq!(
+            addrs,
+            vec![
+                SocketAddr::new(IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), 8448),
+                SocketAddr::new(IpAddr::from([127, 0, 0, 1]), 8448),
+            ]
+        );
     }
 
     /// Test servers with explicit ports

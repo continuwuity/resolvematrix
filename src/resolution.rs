@@ -42,27 +42,38 @@ impl Resolution {
     }
 
     /// Get the destination address for DNS resolution mapping.
-    pub(crate) async fn destination_addr(&self, resolver: &TokioResolver) -> Option<SocketAddr> {
+    pub(crate) async fn destination_addrs(
+        &self,
+        resolver: &TokioResolver,
+    ) -> Option<Vec<SocketAddr>> {
         match &self.destination {
-            ResolvedDestination::Literal(addr) => Some(*addr),
+            ResolvedDestination::Literal(addr) => Some(vec![*addr]),
             ResolvedDestination::Named(dest_host, dest_port) => {
                 let port: u16 = dest_port.parse().ok()?;
 
                 // Try to parse as IP first
                 if let Ok(ip) = dest_host.parse::<IpAddr>() {
-                    return Some(SocketAddr::new(ip, port));
+                    return Some(vec![SocketAddr::new(ip, port)]);
                 }
 
                 // Resolve via DNS
                 match resolver.lookup_ip(dest_host.as_str()).await {
                     Ok(lookup) => {
-                        let ip = lookup.iter().next()?;
-                        Some(SocketAddr::new(ip, port))
+                        let addrs: Vec<SocketAddr> =
+                            lookup.iter().map(|ip| SocketAddr::new(ip, port)).collect();
+                        if addrs.is_empty() { None } else { Some(addrs) }
                     }
                     Err(_) => None,
                 }
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn destination_addr(&self, resolver: &TokioResolver) -> Option<SocketAddr> {
+        self.destination_addrs(resolver)
+            .await
+            .and_then(|addrs| addrs.into_iter().next())
     }
 }
 
@@ -109,6 +120,12 @@ mod tests {
 
     use super::*;
 
+    fn socket_addrs_from_ips(ips: impl IntoIterator<Item = IpAddr>, port: u16) -> Vec<SocketAddr> {
+        ips.into_iter()
+            .map(|ip| SocketAddr::new(ip, port))
+            .collect()
+    }
+
     #[rstest]
     #[tokio::test]
     async fn test_resolution() {
@@ -123,6 +140,10 @@ mod tests {
             host: "127.0.0.1".to_string(),
         };
         assert_eq!(
+            literal_ip.destination_addrs(&resolver).await,
+            Some(vec![socketaddr])
+        );
+        assert_eq!(
             literal_ip.destination_addr(&resolver).await,
             Some(socketaddr)
         );
@@ -136,6 +157,10 @@ mod tests {
             ),
             host: "127.0.0.1".to_string(),
         };
+        assert_eq!(
+            named_ip.destination_addrs(&resolver).await,
+            Some(vec![socketaddr])
+        );
         assert_eq!(named_ip.destination_addr(&resolver).await, Some(socketaddr));
         assert_eq!(named_ip.base_url(), "https://127.0.0.1:8448");
         assert_eq!(named_ip.sni_hostname(), "127.0.0.1");
@@ -158,6 +183,25 @@ mod tests {
             host: "testdomain.invalid:9090".to_string(),
         };
         assert_eq!(invalid_dns_address.destination_addr(&resolver).await, None);
+    }
+
+    #[test]
+    fn test_socket_addrs_from_ips_preserves_order() {
+        let addrs = socket_addrs_from_ips(
+            [
+                IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]),
+                IpAddr::from([127, 0, 0, 1]),
+            ],
+            8448,
+        );
+
+        assert_eq!(
+            addrs,
+            vec![
+                SocketAddr::new(IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), 8448),
+                SocketAddr::new(IpAddr::from([127, 0, 0, 1]), 8448),
+            ]
+        );
     }
 
     #[rstest]
