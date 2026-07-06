@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 pub struct CacheEntry {
     pub resolution: Resolution,
     pub expires_at: Instant,
-    pub is_override: bool, // If true, this is a Matrix resolution that should be refetched when expired
 }
 
 /// Result of a cache lookup.
@@ -66,14 +65,9 @@ impl Cache {
                 return CacheLookup::Valid(entry.resolution.clone());
             }
 
-            let is_override = entry.is_override; //
             cache.with_upgraded(|c| c.remove(hostname));
 
-            return if is_override {
-                CacheLookup::ExpiredOverride(hostname.to_string())
-            } else {
-                CacheLookup::Miss
-            };
+            return CacheLookup::ExpiredOverride(hostname.to_string());
         }
 
         // Try hostname mapping
@@ -98,7 +92,6 @@ impl Cache {
             CacheEntry {
                 resolution: resolution.clone(),
                 expires_at: Instant::now() + self.ttl,
-                is_override: true, // All Matrix resolutions are overrides
             },
         );
 
