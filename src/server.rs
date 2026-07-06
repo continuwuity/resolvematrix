@@ -74,7 +74,11 @@ impl reqwest::dns::Resolve for MatrixDnsResolver {
                             }
                         }
                         Err(e) => {
-                            tracing::warn!("Failed to refetch Matrix server {server_name}: {e:?}",);
+                            tracing::warn!(
+                                ?server_name,
+                                ?e,
+                                "Failed to refetch Matrix server resolution",
+                            );
                         }
                     }
                 }
@@ -313,7 +317,7 @@ impl MatrixResolver {
     async fn resolve_actual_dest(&self, dest: &str) -> Result<Resolution, ResolveServerError> {
         // 1. If the hostname is an IP literal
         if let Some((ip, port)) = get_ip_with_port(dest) {
-            tracing::info!(
+            tracing::debug!(
                 ip = %ip,
                 port = port,
                 step = "ip_literal",
@@ -330,7 +334,7 @@ impl MatrixResolver {
         if let Some(pos) = dest.find(':') {
             let (host_part, port_part) = dest.split_at(pos);
             let port_str = port_part.trim_start_matches(':');
-            tracing::info!(
+            tracing::debug!(
                 host = %host_part,
                 port = %port_str,
                 step = "explicit_port",
@@ -344,11 +348,11 @@ impl MatrixResolver {
 
         // 3. Well-known delegation
         if let Some(res) = self.resolve_well_known(dest).await {
-            tracing::info!(?res, step = "well_known", "Resolved .well-known delegation");
+            tracing::debug!(?res, step = "well_known", "Resolved .well-known delegation");
             return match res {
                 // 3.1: delegated_hostname is an IP literal, optionally with port else default
                 WellKnownServerResult::Ip(ip, port) => {
-                    tracing::info!(
+                    tracing::debug!(
                         ip = %ip,
                         port = port.unwrap_or(8448),
                         step = "well_known_ip_literal",
@@ -362,7 +366,7 @@ impl MatrixResolver {
                 }
                 // 3.2: Hostname with explicit port in .well-known
                 WellKnownServerResult::Domain(domain, Some(port)) => {
-                    tracing::info!(
+                    tracing::debug!(
                         domain = %domain,
                         port = port,
                         step = "well_known_domain",
@@ -376,7 +380,7 @@ impl MatrixResolver {
                 WellKnownServerResult::Domain(domain, None) => {
                     // 3.3/3.4: Hostname, no port in .well-known
                     if let Some((srv_host, srv_port)) = self.query_srv_record(&domain).await? {
-                        tracing::info!(
+                        tracing::debug!(
                             srv_host = %srv_host,
                             srv_port = srv_port,
                             step = "well_known_host_srv",
@@ -465,7 +469,7 @@ impl MatrixResolver {
         let json_data = match resp.limit_read().await {
             Ok(s) => serde_json::from_slice(&s),
             Err(error) => {
-                tracing::warn!(
+                tracing::debug!(
                     ?error,
                     ?url,
                     limit = MAX_WELL_KNOWN_SIZE,
@@ -477,7 +481,7 @@ impl MatrixResolver {
         let wk: WellKnown = match json_data {
             Ok(wk) => wk,
             Err(e) => {
-                tracing::warn!(
+                tracing::info!(
                     error = %e,
                     url = %url,
                     "Failed to parse .well-known matrix server JSON"
