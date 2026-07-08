@@ -5,7 +5,7 @@ use std::net::{IpAddr, SocketAddr};
 /// Resolution steps as defined by the Matrix specification (v1.18)
 ///
 /// https://spec.matrix.org/v1.18/server-server-api/#server-discovery
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ResolutionStep {
     /// Step 1
     ///
@@ -124,7 +124,7 @@ impl Display for ResolutionStep {
 ///
 /// Contains the resolved destination (IP/Port or Hostname/Port) and the
 /// hostname to use for SNI/Host headers.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Resolution {
     /// The actual destination to connect to.
     pub destination: ResolvedDestination,
@@ -212,7 +212,7 @@ impl Resolution {
 }
 
 /// Represents the resolved destination for a Matrix server.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ResolvedDestination {
     /// A literal IP address and port (e.g., 1.2.3.4:8448)
     Literal(SocketAddr),

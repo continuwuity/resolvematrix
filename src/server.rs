@@ -684,7 +684,7 @@ fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use assertables::{assert_none, assert_some};
+    use assertables::{assert_none, assert_ok, assert_some};
     use httpmock::Method::GET;
     use httpmock::MockServer;
     use rstest::rstest;
@@ -1183,5 +1183,23 @@ pub(crate) mod tests {
         assert_some!(resolved_correct_json);
         assert_none!(resolved_broken_json);
         assert_none!(resolved_oversize_response);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_cache_hits() {
+        init_tracing();
+
+        let resolver = Arc::new(MatrixResolver::new().unwrap());
+
+        let server_name = "matrix.org";
+
+        let response = resolver.resolve_server(server_name).await;
+        assert_ok!(&response);
+
+        // Querying the same server twice should hit the cache, and give an identical response
+        let second_response = resolver.resolve_server(server_name).await;
+        assert_ok!(&second_response);
+        assert_eq!(response.unwrap(), second_response.unwrap());
     }
 }

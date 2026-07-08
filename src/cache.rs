@@ -14,7 +14,7 @@ pub struct CacheEntry {
 }
 
 /// Result of a cache lookup.
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum CacheLookup {
     /// Valid cached entry found
     Valid(Resolution),
@@ -25,10 +25,10 @@ pub enum CacheLookup {
 }
 
 /// Simple cache for Matrix server resolutions with TTL-based expiry.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Cache {
-    inner: Arc<RwLock<HashMap<String, CacheEntry>>>,
-    hostname_map: Arc<RwLock<HashMap<String, String>>>, // hostname -> server_name
+    pub(crate) inner: Arc<RwLock<HashMap<String, CacheEntry>>>,
+    pub(crate) hostname_map: Arc<RwLock<HashMap<String, String>>>, // hostname -> server_name
     pub(crate) ttl: Duration,
 }
 
@@ -41,6 +41,8 @@ impl Cache {
         }
     }
 
+    /// Get a cache resolution entry if it exists and is valid, otherwise remove possibly expired entry
+    /// and return None
     pub fn get(&self, server_name: &str) -> Option<Resolution> {
         // First try read lock to check if entry exists and is valid
         if let cache = self.inner.read()
@@ -56,10 +58,17 @@ impl Cache {
             && SystemTime::now() >= entry.expires_at
         {
             cache.with_upgraded(|c| c.remove(server_name));
+            {
+                // Remove hostname mapping along with cache entry
+                let mut hostname_map = self.hostname_map.write();
+                hostname_map.remove(server_name);
+            };
         }
         None
     }
 
+    /// Lookup a cache entry, and attempt to use hostname mapping if it cannot be found by the provided
+    /// name.
     pub fn lookup(&self, hostname: &str) -> CacheLookup {
         let mut cache = self.inner.upgradable_read();
         if let Some(entry) = cache.get(hostname) {
@@ -83,18 +92,17 @@ impl Cache {
             hostname_map.get(hostname).cloned()
         };
 
-        if let Some(server_name) = mapped_server_name {
-            if let Some(resolution) = self.get(&server_name) {
-                return CacheLookup::Valid(resolution);
-            }
-            // If the mapping exists but the server_name entry is expired/missing,
-            // treat it as an expired override
-            return CacheLookup::ExpiredOverride(server_name);
+        if let Some(server_name) = mapped_server_name
+            && let Some(resolution) = self.get(&server_name)
+        {
+            return CacheLookup::Valid(resolution);
         }
 
         CacheLookup::Miss
     }
 
+    /// Set a new resolution entry, saving the hostname map if the SNI hostname and server name do
+    /// not match
     pub fn set(&self, server_name: String, resolution: &Resolution) {
         let sni_hostname = resolution.sni_hostname();
         let is_override = resolution.is_override;
@@ -163,6 +171,75 @@ mod tests {
     use super::*;
 
     #[rstest]
+    fn test_set_item() {
+        init_tracing();
+
+        let cache = Cache::new(Duration::from_secs(300));
+
+        let server_name = "matrix.org";
+        let resolved_hostname = "matrix-federation.matrix.org";
+        let port = "448";
+
+        let resolution = Resolution {
+            destination: ResolvedDestination::Named(
+                resolved_hostname.to_string(),
+                port.to_string(),
+            ),
+            host: format!("{resolved_hostname}:{port}"),
+            is_override: false,
+            resolution_step: ResolutionStep::WellKnownHostPort,
+        };
+
+        cache.set(server_name.to_string(), &resolution);
+        dbg!(&cache);
+
+        assert_eq!(dbg!(cache.inner.read().values().count()), 1);
+        assert_eq!(dbg!(cache.hostname_map.read().values().count()), 1);
+
+        let cache_get = dbg!(cache.get(server_name));
+        let hostname_read = cache.hostname_map.read();
+        let hostname_get = dbg!(hostname_read.get(resolved_hostname));
+
+        assert_some!(&cache_get);
+        assert_some!(&hostname_get);
+
+        assert_eq!(cache_get.unwrap(), resolution);
+        assert_eq!(hostname_get.unwrap(), server_name);
+    }
+
+    #[rstest]
+    fn test_lookup() {
+        init_tracing();
+
+        let cache = Cache::new(Duration::from_secs(1));
+
+        let server_name = "matrix.org";
+        let resolution = Resolution {
+            destination: ResolvedDestination::Named(
+                "matrix-federation.matrix.org".to_string(),
+                "8448".to_string(),
+            ),
+            host: "matrix-federation.matrix.org".to_string(),
+            is_override: true,
+            resolution_step: ResolutionStep::WellKnownHostPort,
+        };
+
+        assert_eq!(cache.lookup("doesn't exist"), CacheLookup::Miss);
+
+        cache.set(server_name.to_string(), &resolution);
+        assert_eq!(
+            dbg!(cache.lookup(server_name)),
+            CacheLookup::Valid(resolution.clone())
+        );
+
+        std::thread::sleep(Duration::from_secs(2));
+        assert_eq!(
+            dbg!(cache.lookup(server_name)),
+            CacheLookup::ExpiredOverride(server_name.to_string())
+        );
+    }
+
+    #[rstest]
     #[tokio::test]
     async fn remove_entry() {
         init_tracing();
@@ -216,7 +293,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn clear_cache() {
-        crate::server::tests::init_tracing();
+        init_tracing();
 
         // Setup code
         let cache = Cache::new(Duration::from_secs(300));
@@ -363,5 +440,54 @@ mod tests {
         // Actual test
         let servers = dbg!(cache.get_all());
         assert_eq!(servers.len(), 2);
+    }
+
+    #[rstest]
+    fn get_expired() {
+        init_tracing();
+
+        let cache = Cache::new(Duration::from_secs(0));
+
+        let server_name = "matrix.org";
+        let resolution = Resolution {
+            destination: ResolvedDestination::Named(
+                "matrix-federation.matrix.org".to_string(),
+                "8448".to_string(),
+            ),
+            host: "matrix-federation.matrix.org".to_string(),
+            is_override: true,
+            resolution_step: ResolutionStep::WellKnownHostPort,
+        };
+
+        cache.set(server_name.to_string(), &resolution);
+        std::thread::sleep(Duration::from_secs(1));
+
+        assert_none!(cache.get(server_name));
+    }
+
+    #[rstest]
+    fn lookup_not_found() {
+        init_tracing();
+
+        let cache = Cache::new(Duration::from_secs(0));
+
+        let server_name = "matrix.org";
+        let resolution = Resolution {
+            destination: ResolvedDestination::Named(
+                "matrix-federation.matrix.org".to_string(),
+                "8448".to_string(),
+            ),
+            host: "matrix-federation.matrix.org".to_string(),
+            is_override: true,
+            resolution_step: ResolutionStep::WellKnownHostPort,
+        };
+
+        cache.set(server_name.to_string(), &resolution);
+        std::thread::sleep(Duration::from_secs(1));
+
+        // First lookup deletes the cache but leaves the hostname mapping
+        cache.get(server_name);
+
+        cache.lookup(server_name);
     }
 }
