@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use crate::cache::{Cache, CacheEntry, CacheLookup};
 use crate::error::ResolveServerError;
-use crate::resolution::{Resolution, ResolvedDestination};
+use crate::resolution::{Resolution, ResolutionStep, ResolvedDestination};
 use futures::StreamExt;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::proto::rr::RData;
@@ -328,6 +328,7 @@ impl MatrixResolver {
                 destination: ResolvedDestination::Literal(socket),
                 host: dest.to_owned(),
                 is_override: false,
+                resolution_step: ResolutionStep::IPLiteral,
             });
         }
 
@@ -345,6 +346,7 @@ impl MatrixResolver {
                 destination: ResolvedDestination::Named(host_part.to_owned(), port_str.to_owned()),
                 host: dest.to_owned(),
                 is_override: false,
+                resolution_step: ResolutionStep::HostPort,
             });
         }
 
@@ -365,6 +367,7 @@ impl MatrixResolver {
                         destination: ResolvedDestination::Literal(socket),
                         host: dest.to_owned(),
                         is_override: false,
+                        resolution_step: ResolutionStep::WellKnownIPLiteral,
                     })
                 }
                 // 3.2: Hostname with explicit port in .well-known
@@ -379,11 +382,14 @@ impl MatrixResolver {
                         destination: ResolvedDestination::Named(domain.clone(), port.to_string()),
                         host: format!("{domain}:{port}"),
                         is_override: false,
+                        resolution_step: ResolutionStep::WellKnownHostPort,
                     })
                 }
                 WellKnownServerResult::Domain(domain, None) => {
                     // 3.3/3.4: Hostname, no port in .well-known
-                    if let Some((srv_host, srv_port)) = self.query_srv_record(&domain).await? {
+                    if let Some((srv_host, srv_port, was_fed)) =
+                        self.query_srv_record(&domain).await?
+                    {
                         tracing::debug!(
                             srv_host = %srv_host,
                             srv_port = srv_port,
@@ -394,6 +400,10 @@ impl MatrixResolver {
                             destination: ResolvedDestination::Named(srv_host, srv_port.to_string()),
                             host: domain,
                             is_override: true,
+                            resolution_step: match was_fed {
+                                true => ResolutionStep::WellKnownSrvMatrixFed,
+                                false => ResolutionStep::WellKnownSrvMatrix,
+                            },
                         })
                     } else {
                         // 3.5: No SRV, fallback to A/AAAA/CNAME + 8448
@@ -409,14 +419,15 @@ impl MatrixResolver {
                             ),
                             host: domain,
                             is_override: true,
+                            resolution_step: ResolutionStep::WellKnownDefaultPort,
                         })
                     }
                 }
             };
         }
 
-        // 4. SRV lookup on original hostname
-        if let Some((srv_host, srv_port)) = self.query_srv_record(dest).await? {
+        // 4/5. SRV lookup on original hostname
+        if let Some((srv_host, srv_port, was_fed)) = self.query_srv_record(dest).await? {
             tracing::trace!(
                 srv_host = %srv_host,
                 srv_port = srv_port,
@@ -427,10 +438,14 @@ impl MatrixResolver {
                 destination: ResolvedDestination::Named(srv_host, srv_port.to_string()),
                 host: dest.to_owned(),
                 is_override: true,
+                resolution_step: match was_fed {
+                    true => ResolutionStep::SrvMatrixFed,
+                    false => ResolutionStep::SrvMatrix,
+                },
             });
         }
 
-        // 5. Fallback: A/AAAA/CNAME + 8448
+        // 6. Fallback: A/AAAA/CNAME + 8448
         tracing::trace!(
             host = %dest,
             step = "fallback",
@@ -440,6 +455,7 @@ impl MatrixResolver {
             destination: ResolvedDestination::Named(dest.to_owned(), "8448".to_owned()),
             host: dest.to_owned(),
             is_override: false,
+            resolution_step: ResolutionStep::DefaultPort,
         })
     }
 
@@ -539,7 +555,7 @@ impl MatrixResolver {
     async fn query_srv_record(
         &self,
         hostname: &str,
-    ) -> Result<Option<(String, u16)>, ResolveServerError> {
+    ) -> Result<Option<(String, u16, bool)>, ResolveServerError> {
         let srv_names = [
             format!("_matrix-fed._tcp.{hostname}"),
             format!("_matrix._tcp.{hostname}"),
@@ -557,9 +573,14 @@ impl MatrixResolver {
                     })
                     .next()
             {
+                let was_fed = srv.contains("-fed");
                 let target = record.target.to_utf8();
                 let port = record.port;
-                return Ok(Some((target.trim_end_matches('.').to_owned(), port)));
+                return Ok(Some((
+                    target.trim_end_matches('.').to_owned(),
+                    port,
+                    was_fed,
+                )));
             }
         }
         tracing::trace!(hostname = %hostname, "No SRV records found for hostname");

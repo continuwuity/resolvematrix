@@ -1,6 +1,118 @@
 use hickory_resolver::TokioResolver;
 use std::net::{IpAddr, SocketAddr};
 
+/// Resolution steps as defined by the Matrix specification (v1.18)
+///
+/// https://spec.matrix.org/v1.18/server-server-api/#server-discovery
+#[derive(Debug, Clone)]
+pub enum ResolutionStep {
+    /// Step 1
+    ///
+    /// > If the hostname is an IP literal, then that IP address should be used, together with the
+    /// > given port number, or 8448 if no port is given. The target server must present a valid
+    /// > certificate for the IP address. The `Host` header in the request should be set to the
+    /// > server name, including the port if the server name included one.
+    IPLiteral,
+
+    /// Step 2
+    ///
+    /// > If the hostname is not an IP literal, and the server name includes an explicit port,
+    /// > resolve the hostname to an IP address using CNAME, AAAA or A records. Requests are made
+    /// > to the resolved IP address and given port with a `Host` header of the original server name
+    /// > (with port). The target server must present a valid certificate for the hostname.
+    HostPort,
+
+    /// Step 3.1
+    ///
+    /// > If `<delegated_hostname>` is an IP literal, then that IP address should be used together
+    /// > with the `<delegated_port>` or 8448 if no port is provided. The target server must present
+    /// > a valid TLS certificate for the IP address. Requests must be made with a `Host` header
+    /// > containing the IP address, including the port if one was provided.
+    WellKnownIPLiteral,
+
+    /// Step 3.2
+    ///
+    /// > If `<delegated_hostname>` is not an IP literal, and `<delegated_port>` is present, an
+    /// > IP address is discovered by looking up CNAME, AAAA or A records for `<delegated_hostname>`.
+    /// > The resulting IP address is used, alongside the `<delegated_port>`. Requests must be made
+    /// > with a `Host` header of `<delegated_hostname>:<delegated_port>`. The target server must
+    /// > present a valid certificate for `<delegated_hostname>`.
+    WellKnownHostPort,
+
+    /// Step 3.3
+    ///
+    /// > **\[Added in v1.8]** If `<delegated_hostname>` is not an IP literal and no `<delegated_port>`
+    /// > is present, an SRV record is looked up for `_matrix-fed._tcp.<delegated_hostname>`. This may
+    /// > result in another hostname (to be resolved using AAAA or A records) and port.
+    /// > Requests should be made to the resolved IP address and port with a `Host` header containing
+    /// > the `<delegated_hostname>`. The target server must present a valid certificate
+    /// > for `<delegated_hostname>`.
+    WellKnownSrvMatrixFed,
+
+    /// Step 3.4
+    ///
+    /// > **\[Deprecated]** If `<delegated_hostname>` is not an IP literal, no `<delegated_port>` is
+    /// > present, and a `_matrix-fed._tcp.<delegated_hostname>` SRV record was not found, an SRV
+    /// > record is looked up for `_matrix._tcp.<delegated_hostname>`. This may result in another
+    /// > hostname (to be resolved using AAAA or A records) and port. Requests should be made to the
+    /// > resolved IP address and port with a `Host` header containing the `<delegated_hostname>`.
+    /// > The target server must present a valid certificate for `<delegated_hostname>`.
+    WellKnownSrvMatrix,
+
+    /// Step 3.5
+    ///
+    /// > If no SRV record is found, an IP address is resolved using CNAME, AAAA or A records.
+    /// > Requests are then made to the resolved IP address and a port of 8448, using a `Host`
+    /// > header of `<delegated_hostname>`. The target server must present a valid certificate
+    /// > for `<delegated_hostname>`.
+    WellKnownDefaultPort,
+
+    /// Step 4
+    ///
+    /// > **\[Added in v1.8]** If the `/.well-known` request resulted in an error response, a server
+    /// > is found by resolving an SRV record for `_matrix-fed._tcp.<hostname>`. This may result in
+    /// > a hostname (to be resolved using AAAA or A records) and port. Requests are made to the
+    /// > resolved IP address and port, with a `Host` header of `<hostname>`. The target server must
+    /// > present a valid certificate for `<hostname>`.
+    SrvMatrixFed,
+
+    /// Step 5
+    ///
+    /// > **\[Deprecated]** If the `/.well-known` request resulted in an error response, and a
+    /// > `_matrix-fed._tcp.<hostname>` SRV record was not found, a server is found by resolving an
+    /// > SRV record for `_matrix._tcp.<hostname>`. This may result in a hostname (to be resolved
+    /// > using AAAA or A records) and port. Requests are made to the resolved IP address and port,
+    /// > with a `Host` header of `<hostname>`. The target server must present a valid certificate
+    /// > for `<hostname>`.
+    SrvMatrix,
+
+    /// Step 6
+    ///
+    /// > If the `/.well-known` request returned an error response, and no SRV records were found,
+    /// > an IP address is resolved using CNAME, AAAA and A records. Requests are made to the
+    /// > resolved IP address using port 8448 and a `Host` header containing the `<hostname>`. The
+    /// > target server must present a valid certificate for `<hostname>`.
+    DefaultPort,
+}
+
+impl ResolutionStep {
+    #[allow(dead_code)]
+    fn as_str(&self) -> &'static str {
+        match self {
+            ResolutionStep::IPLiteral => "1",
+            ResolutionStep::HostPort => "2",
+            ResolutionStep::WellKnownIPLiteral => "3.1",
+            ResolutionStep::WellKnownHostPort => "3.2",
+            ResolutionStep::WellKnownSrvMatrixFed => "3.3",
+            ResolutionStep::WellKnownSrvMatrix => "3.4",
+            ResolutionStep::WellKnownDefaultPort => "3.5",
+            ResolutionStep::SrvMatrixFed => "4",
+            ResolutionStep::SrvMatrix => "5",
+            ResolutionStep::DefaultPort => "6",
+        }
+    }
+}
+
 /// Result of a Matrix server resolution.
 ///
 /// Contains the resolved destination (IP/Port or Hostname/Port) and the
@@ -9,11 +121,16 @@ use std::net::{IpAddr, SocketAddr};
 pub struct Resolution {
     /// The actual destination to connect to.
     pub destination: ResolvedDestination,
+
     /// The hostname to use for TLS SNI and HTTP Host header. May contain a port if the target
     /// has one (e.g. from looking up the resolution for `example.com:9090`).
     pub host: String,
+
     /// Whether the resolution requires using `host` as an SNI/Host override.
     pub is_override: bool,
+
+    /// Which part of the spec was used to resolve the resolution.
+    pub resolution_step: ResolutionStep,
 }
 
 impl Resolution {
@@ -149,6 +266,7 @@ mod tests {
             destination: ResolvedDestination::Literal(socketaddr),
             host: "127.0.0.1".to_string(),
             is_override: false,
+            resolution_step: ResolutionStep::IPLiteral,
         };
         assert_eq!(
             literal_ip.destination_addrs(&resolver).await,
@@ -168,6 +286,7 @@ mod tests {
             ),
             host: "127.0.0.1".to_string(),
             is_override: false,
+            resolution_step: ResolutionStep::IPLiteral,
         };
         assert_eq!(
             named_ip.destination_addrs(&resolver).await,
@@ -181,6 +300,7 @@ mod tests {
             destination: ResolvedDestination::Named("example.com".to_string(), "9090".to_string()),
             host: "example.com:9090".to_string(),
             is_override: true,
+            resolution_step: ResolutionStep::HostPort,
         };
         assert_eq!(
             named_with_port_in_host.base_url(),
@@ -192,6 +312,7 @@ mod tests {
             destination: ResolvedDestination::Literal(socketaddr),
             host: "[::1]:8448".to_string(),
             is_override: false,
+            resolution_step: ResolutionStep::IPLiteral,
         };
         assert_eq!(ipv6_host.sni_hostname(), "::1");
 
@@ -199,6 +320,7 @@ mod tests {
             destination: ResolvedDestination::Literal(socketaddr),
             host: "::1".to_string(),
             is_override: false,
+            resolution_step: ResolutionStep::IPLiteral,
         };
         assert_eq!(bare_ipv6_host.sni_hostname(), "::1");
 
@@ -209,6 +331,7 @@ mod tests {
             ),
             host: "testdomain.invalid:9090".to_string(),
             is_override: true,
+            resolution_step: ResolutionStep::HostPort,
         };
         assert_eq!(invalid_dns_address.destination_addr(&resolver).await, None);
     }

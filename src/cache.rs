@@ -155,7 +155,7 @@ impl Cache {
 
 #[cfg(test)]
 mod tests {
-    use crate::resolution::ResolvedDestination;
+    use crate::resolution::{ResolutionStep, ResolvedDestination};
     use crate::server::tests::init_tracing;
     use assertables::{assert_none, assert_some};
     use rstest::rstest;
@@ -175,6 +175,7 @@ mod tests {
             destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
             host: String::from(server1_name),
             is_override: false,
+            resolution_step: ResolutionStep::HostPort,
         };
 
         let server2_name = "example.com";
@@ -182,6 +183,7 @@ mod tests {
             destination: ResolvedDestination::Named("example.com".to_string(), "8448".to_string()),
             host: String::from(server2_name),
             is_override: false,
+            resolution_step: ResolutionStep::HostPort,
         };
 
         cache.set(String::from(server1_name), &server1_resolution);
@@ -224,6 +226,7 @@ mod tests {
             destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
             host: String::from(server1_name),
             is_override: false,
+            resolution_step: ResolutionStep::HostPort,
         };
 
         let server2_name = "example.com";
@@ -231,6 +234,7 @@ mod tests {
             destination: ResolvedDestination::Named("example.com".to_string(), "8448".to_string()),
             host: String::from(server2_name),
             is_override: false,
+            resolution_step: ResolutionStep::HostPort,
         };
 
         cache.set(String::from(server1_name), &server1_resolution);
@@ -261,6 +265,7 @@ mod tests {
             ),
             host: String::from("example-federation.example.com"),
             is_override: true,
+            resolution_step: ResolutionStep::SrvMatrix,
         };
 
         cache.set(String::from(server_name), &resolution);
@@ -285,6 +290,7 @@ mod tests {
             destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
             host: String::from(server_name),
             is_override: false,
+            resolution_step: ResolutionStep::HostPort,
         };
 
         cache.set(String::from(server_name), &resolution);
@@ -310,6 +316,7 @@ mod tests {
             ),
             host: String::from("matrix.example.org"),
             is_override: true,
+            resolution_step: ResolutionStep::HostPort,
         };
 
         cache.set(String::from(server_name), &resolution);
@@ -339,6 +346,7 @@ mod tests {
             destination: ResolvedDestination::Named("matrix.org".to_string(), "8448".to_string()),
             host: String::from(server1_name),
             is_override: false,
+            resolution_step: ResolutionStep::HostPort,
         };
 
         let server2_name = "example.com";
@@ -346,6 +354,7 @@ mod tests {
             destination: ResolvedDestination::Named("example.com".to_string(), "8448".to_string()),
             host: String::from(server2_name),
             is_override: false,
+            resolution_step: ResolutionStep::HostPort,
         };
 
         cache.set(String::from(server1_name), &server1_resolution);
