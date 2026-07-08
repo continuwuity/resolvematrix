@@ -1,4 +1,5 @@
 use hickory_resolver::TokioResolver;
+use std::fmt::Display;
 use std::net::{IpAddr, SocketAddr};
 
 /// Resolution steps as defined by the Matrix specification (v1.18)
@@ -110,6 +111,12 @@ impl ResolutionStep {
             ResolutionStep::SrvMatrix => "5",
             ResolutionStep::DefaultPort => "6",
         }
+    }
+}
+
+impl Display for ResolutionStep {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({:?})", self.as_str(), self)
     }
 }
 
