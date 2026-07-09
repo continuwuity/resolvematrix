@@ -265,6 +265,13 @@ impl MatrixResolver {
         self.create_client_with_builder(builder)
     }
 
+    /// Returns a DNS resolver wrapper to be used in a `reqwest::ClientBuilder::dns_resolver()`.
+    ///
+    /// See more details in `MatrixDnsResolver`'s doc comment
+    pub fn create_dns_resolver(self: &Arc<Self>) -> MatrixDnsResolver {
+        MatrixDnsResolver::new(self.resolver.clone(), self.cache.clone(), self.clone())
+    }
+
     /// Resolve a Matrix server name and return the Resolution.
     ///
     /// The returned Resolution can be used to construct URLs via `resolution.base_url()`.
