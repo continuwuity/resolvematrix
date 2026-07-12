@@ -15,13 +15,13 @@ rust-version = "1.88.0"
 
 [features]
 default = ["ring"]
-aws_lc_rs = ["rustls/aws_lc_rs", "reqwest/__rustls-aws-lc-rs"]
-ring = ["rustls/ring", "reqwest/__rustls"]
+aws_lc_rs = ["rustls/aws_lc_rs"]
+ring = ["rustls/ring"]
 
 [dependencies]
 hickory-resolver = { version = "0.26.1", default-features = false, features = ["tokio", "system-config"]}
 parking_lot = "0.12.5"
-reqwest = { version = "0.13.2", default-features = false, features = ["stream", "json"] } # JSON only used for tests
+reqwest = { version = "0.13.2", default-features = false, features = ["stream", "json", "rustls-no-provider"] } # JSON only used for tests
 serde = { version = "1.0.228", default-features = false, features = ["serde_derive"] }
 thiserror = { version = "2.0.18", default-features = false }
 tracing = { version = "0.1.44", default-features = false, features = ["attributes"] }
