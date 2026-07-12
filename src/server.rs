@@ -1170,12 +1170,6 @@ pub(crate) mod tests {
             .install_default()
             .expect("failed to initialize ring crypto provider");
 
-        #[cfg(any(
-            all(not(feature = "ring"), not(feature = "aws_lc_rs")),
-            all(feature = "ring", feature = "aws_lc_rs")
-        ))]
-        panic!("Either of ring or aws_lc_rs must be enabled, not both or neither");
-
         let resolver = Arc::new(
             MatrixResolverBuilder::new()
                 .dangerous_tls_accept_invalid_certs(true)
