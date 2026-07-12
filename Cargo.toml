@@ -14,10 +14,12 @@ edition = "2024"
 rust-version = "1.88.0"
 
 [features]
-default = ["reqwest/default-tls", "hickory-resolver/system-config"]
+default = ["ring"]
+aws_lc_rs = ["rustls/aws_lc_rs", "reqwest/__rustls-aws-lc-rs"]
+ring = ["rustls/ring", "reqwest/__rustls"]
 
 [dependencies]
-hickory-resolver = { version = "0.26.1", default-features = false, features = ["tokio"], optional = true }
+hickory-resolver = { version = "0.26.1", default-features = false, features = ["tokio", "system-config"]}
 parking_lot = "0.12.5"
 reqwest = { version = "0.13.2", default-features = false, features = ["stream", "json"] } # JSON only used for tests
 serde = { version = "1.0.228", default-features = false, features = ["serde_derive"] }
@@ -35,4 +37,4 @@ tokio = { version = "1.50.0", default-features = false, features = ["tokio-macro
 reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
 hickory-resolver = { version = "0.26.1", default-features = false, features = ["system-config"] }
 httpmock = { version = "0.8.3", default-features = false, features = ["https", "http2"] }
-rustls = { version = "0.23.41", features = ["aws_lc_rs"], default-features = true }
+rustls = { version = "0.23.41", default-features = false }
