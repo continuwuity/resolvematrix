@@ -2,28 +2,26 @@ use thiserror::Error;
 
 /// Error type for Matrix server resolution.
 #[derive(Debug, Error)]
-pub enum ResolveServerError {
-    #[error("Failed to parse address: {0}")]
-    AddrParse(#[from] std::net::AddrParseError),
-
-    #[error("HTTP client error: {0}")]
-    Http(#[from] reqwest::Error),
-
+pub enum ServerResolutionError {
     #[error("DNS resolution error: {0}")]
     Dns(#[from] hickory_resolver::net::NetError),
+}
 
-    #[error("Invalid port number: {0}")]
-    InvalidPort(#[from] std::num::ParseIntError),
+/// Error type for Matrix server resolution.
+#[derive(Debug, Error)]
+pub enum ServerResolverBuilderError {
+    #[error("DNS resolver builder error: {0}")]
+    Dns(#[from] hickory_resolver::net::NetError),
 
     #[error("Invalid builder options: {0}")]
-    InvalidBuilderOptions(String),
+    InvalidBuilderOptions(InvalidBuilderOption),
 
-    #[error("Invalid UTF-8 data")]
-    InvalidUtf8(#[from] std::string::FromUtf8Error),
+    #[error("HTTP client construction error: {0}")]
+    HttpClientBuilder(reqwest::Error),
+}
 
-    #[error("Response .well-known too large")]
-    WellKnownTooLarge,
-
-    #[error("Unexpected error: {0}")]
-    Other(String),
+#[derive(Debug, Error)]
+pub enum InvalidBuilderOption {
+    #[error("`resolution_cache` and `cache_ttl` are mutually exclusive")]
+    ResolutionCacheExclusive,
 }

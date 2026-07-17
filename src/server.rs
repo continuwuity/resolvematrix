@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::cache::{Cache, CacheEntry, CacheLookup};
-use crate::error::ResolveServerError;
+use crate::error::{InvalidBuilderOption, ServerResolutionError, ServerResolverBuilderError};
 use crate::resolution::{Resolution, ResolutionStep, ResolvedDestination};
 use futures::StreamExt;
 use hickory_resolver::TokioResolver;
@@ -157,12 +157,13 @@ impl MatrixResolverBuilder {
     /// # Errors
     ///
     /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
-    pub fn build(self) -> Result<MatrixResolver, ResolveServerError> {
+    pub fn build(self) -> Result<MatrixResolver, ServerResolverBuilderError> {
         let client = self.http_client.unwrap_or(
             Client::builder()
                 .tls_danger_accept_invalid_certs(self.dangerous_tls_accept_invalid_certs)
                 .timeout(Duration::from_secs(10))
-                .build()?,
+                .build()
+                .map_err(ServerResolverBuilderError::HttpClientBuilder)?,
         );
 
         let resolver = self.dns_resolver.unwrap_or(Arc::new(
@@ -170,8 +171,8 @@ impl MatrixResolverBuilder {
         ));
 
         if self.resolution_cache.is_some() && self.cache_ttl.is_some() {
-            return Err(ResolveServerError::InvalidBuilderOptions(
-                "`resolution_cache` and `cache_ttl` are mutually exclusive".to_string(),
+            return Err(ServerResolverBuilderError::InvalidBuilderOptions(
+                InvalidBuilderOption::ResolutionCacheExclusive,
             ));
         }
         let cache = self.resolution_cache.unwrap_or(Cache::new(
@@ -220,7 +221,7 @@ impl MatrixResolver {
     /// # Errors
     ///
     /// Returns an error if the resolver fails to build. See also `MatrixResolverBuilder.build()`.
-    pub fn new() -> Result<Self, ResolveServerError> {
+    pub fn new() -> Result<Self, ServerResolverBuilderError> {
         MatrixResolverBuilder::new().build()
     }
 
@@ -233,7 +234,7 @@ impl MatrixResolver {
         since = "0.1.0",
         note = "use `MatrixResolverBuilder::new().cache_ttl(Duration).build()` instead"
     )]
-    pub fn new_with_ttl(cache_ttl: Duration) -> Result<Self, ResolveServerError> {
+    pub fn new_with_ttl(cache_ttl: Duration) -> Result<Self, ServerResolverBuilderError> {
         MatrixResolverBuilder::new().cache_ttl(cache_ttl).build()
     }
 
@@ -248,11 +249,14 @@ impl MatrixResolver {
     pub fn create_client_with_builder(
         self: &Arc<Self>,
         builder: reqwest::ClientBuilder,
-    ) -> Result<Client, ResolveServerError> {
+    ) -> Result<Client, ServerResolverBuilderError> {
         let dns_resolver =
             MatrixDnsResolver::new(self.resolver.clone(), self.cache.clone(), self.clone());
 
-        Ok(builder.dns_resolver(Arc::new(dns_resolver)).build()?)
+        builder
+            .dns_resolver(Arc::new(dns_resolver))
+            .build()
+            .map_err(ServerResolverBuilderError::HttpClientBuilder)
     }
 
     /// Create a standard reqwest client that can be reused for all Matrix servers.
@@ -260,7 +264,7 @@ impl MatrixResolver {
     /// # Errors
     ///
     /// Returns an error if the client cannot be built.
-    pub fn create_client(self: &Arc<Self>) -> Result<Client, ResolveServerError> {
+    pub fn create_client(self: &Arc<Self>) -> Result<Client, ServerResolverBuilderError> {
         let builder = Client::builder().timeout(Duration::from_secs(10));
         self.create_client_with_builder(builder)
     }
@@ -297,7 +301,7 @@ impl MatrixResolver {
     pub async fn resolve_server(
         &self,
         server_name: &str,
-    ) -> Result<Resolution, ResolveServerError> {
+    ) -> Result<Resolution, ServerResolutionError> {
         // Check cache first
         if let Some(resolution) = self.cache.get(server_name) {
             tracing::trace!("Cache hit for {server_name}");
@@ -321,7 +325,7 @@ impl MatrixResolver {
         skip(self),
         fields(dest = %dest)
     )]
-    async fn resolve_actual_dest(&self, dest: &str) -> Result<Resolution, ResolveServerError> {
+    async fn resolve_actual_dest(&self, dest: &str) -> Result<Resolution, ServerResolutionError> {
         // 1. If the hostname is an IP literal
         if let Some((ip, port)) = get_ip_with_port(dest) {
             tracing::debug!(
@@ -504,7 +508,7 @@ impl MatrixResolver {
                     ?error,
                     ?url,
                     limit = MAX_WELL_KNOWN_SIZE,
-                    "Well-known response size exceeds maximum"
+                    "Well-known response invalid"
                 );
                 return None;
             }
@@ -562,7 +566,7 @@ impl MatrixResolver {
     async fn query_srv_record(
         &self,
         hostname: &str,
-    ) -> Result<Option<(String, u16, bool)>, ResolveServerError> {
+    ) -> Result<Option<(String, u16, bool)>, ServerResolutionError> {
         let srv_names = [
             format!("_matrix-fed._tcp.{hostname}"),
             format!("_matrix._tcp.{hostname}"),
@@ -622,22 +626,30 @@ pub const MAX_WELL_KNOWN_SIZE: u64 = 262_144; // 256 KiB
 pub trait LimitReadExt {
     /// Reads the response body while enforcing a maximum size limit to prevent
     /// memory exhaustion.
-    async fn limit_read(self) -> Result<Vec<u8>, ResolveServerError>;
+    async fn limit_read(self) -> Result<Vec<u8>, LimitReadError>;
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum LimitReadError {
+    #[error("size limit exceeded")]
+    SizeLimitExceeded,
+    #[error("chunk error")]
+    ChunkError(reqwest::Error),
 }
 
 impl LimitReadExt for reqwest::Response {
-    async fn limit_read(self) -> Result<Vec<u8>, ResolveServerError> {
+    async fn limit_read(self) -> Result<Vec<u8>, LimitReadError> {
         if self
             .content_length()
             .is_some_and(|len| len > MAX_WELL_KNOWN_SIZE)
         {
-            return Err(ResolveServerError::WellKnownTooLarge);
+            return Err(LimitReadError::SizeLimitExceeded);
         }
         let mut data = Vec::new();
         let mut reader = self.bytes_stream();
 
         while let Some(chunk) = reader.next().await {
-            let chunk = chunk?;
+            let chunk = chunk.map_err(LimitReadError::ChunkError)?; // annotate: decode error
             data.extend_from_slice(&chunk);
 
             if data.len()
@@ -645,7 +657,7 @@ impl LimitReadExt for reqwest::Response {
                     .to_usize()
                     .expect("max_size must fit in usize")
             {
-                return Err(ResolveServerError::WellKnownTooLarge);
+                return Err(LimitReadError::SizeLimitExceeded);
             }
         }
 
