@@ -1,17 +1,35 @@
-[package]
-name = "resolvematrix"
+[workspace]
+members = ["cli"]
+resolver = "3"
+
+[workspace.package]
 version = "1.3.0"
 description = "Resolve Matrix servers"
 license = "MPL-2.0"
-authors = ["Jade Ellis <jade@ellis.link>"]
+authors = [
+    "Jade Ellis <jade@ellis.link>",
+    "Ginger <ginger@gingershaped.computer>",
+    "theS1LV3R <me@s1lv3r.codes>",
+]
 
 repository = "https://forgejo.ellis.link/continuwuation/resolvematrix.git"
 homepage = "https://forgejo.ellis.link/continuwuation/resolvematrix"
 
-readme = "README.md"
 edition = "2024"
 
 rust-version = "1.88.0"
+
+[package]
+name = "resolvematrix"
+readme = "README.md"
+version.workspace = true
+description.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+edition.workspace = true
+rust-version.workspace = true
 
 [features]
 default = ["rustls/ring"]
