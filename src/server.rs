@@ -1172,12 +1172,12 @@ pub(crate) mod tests {
         let oversize_response_server_port = oversize_response_server.port();
         let oversize_response_server_address = format!("localhost:{oversize_response_server_port}");
 
-        #[cfg(all(feature = "aws_lc_rs", not(feature = "ring")))]
+        #[cfg(feature = "aws_lc_rs")]
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
             .expect("failed to initialize aws_lc_rs crypto provider");
 
-        #[cfg(all(feature = "ring", not(feature = "aws_lc_rs")))]
+        #[cfg(not(feature = "aws_lc_rs"))]
         rustls::crypto::ring::default_provider()
             .install_default()
             .expect("failed to initialize ring crypto provider");

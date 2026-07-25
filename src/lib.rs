@@ -42,11 +42,3 @@ pub mod cache;
 pub mod error;
 pub mod resolution;
 pub mod server;
-
-#[cfg(any(
-    all(not(feature = "ring"), not(feature = "aws_lc_rs")),
-    all(feature = "ring", feature = "aws_lc_rs")
-))]
-compile_error!(
-    "Either the ring feature or the aws_lc_rs feature must be enabled, not both or neither"
-);

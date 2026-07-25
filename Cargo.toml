@@ -14,9 +14,8 @@ edition = "2024"
 rust-version = "1.88.0"
 
 [features]
-default = ["ring"]
+default = ["rustls/ring"]
 aws_lc_rs = ["rustls/aws_lc_rs"]
-ring = ["rustls/ring"]
 
 [dependencies]
 hickory-resolver = { version = "0.26.1", default-features = false, features = ["tokio", "system-config"]}
