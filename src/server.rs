@@ -687,8 +687,15 @@ fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
         );
         return Some((sock.ip(), Some(sock.port())));
     }
+
+    let stripped = if s.starts_with("[") && s.ends_with("]") {
+        s.strip_prefix("[")?.strip_suffix("]")?
+    } else {
+        s
+    };
+
     // Try IP only
-    if let Ok(ip) = IpAddr::from_str(s) {
+    if let Ok(ip) = IpAddr::from_str(stripped) {
         tracing::trace!(
             ip = %ip,
             port = 8448,
@@ -740,6 +747,7 @@ pub(crate) mod tests {
     #[case::ipv4_multiple_port("127.0.0.1:8080:invalid", None)]
     #[case::ipv6_port("[::1]:8080", Some((IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), Some(8080))))]
     #[case::ipv6_no_port("::1", Some((IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), None)))]
+    #[case::ipv6_with_brackets_no_port("[::1]", Some((IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), None)))]
     #[case::ipv6_invalid_port("[::1]:invalid", None)]
     #[case::ipv6_multiple_ports("[::1]:8080:invalid", None)]
     #[case::ipv6_invalid_addr("::1:8080:invalid", None)]
