@@ -43,12 +43,19 @@ impl Cache {
 
     /// Get a cache resolution entry if it exists and is valid, otherwise remove possibly expired entry
     /// and return None
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(server_name = %server_name)
+    )]
     pub fn get(&self, server_name: &str) -> Option<Resolution> {
+        trace!("Getting entry from inner cache");
         // First try read lock to check if entry exists and is valid
         if let cache = self.inner.read()
             && let Some(entry) = cache.get(server_name)
             && SystemTime::now() < entry.expires_at
         {
+            trace!(?entry, "Got valid cache entry from inner cache");
             return Some(entry.resolution.clone());
         }
 
@@ -57,6 +64,10 @@ impl Cache {
             && let Some(entry) = cache.get(server_name)
             && SystemTime::now() >= entry.expires_at
         {
+            trace!(
+                ?entry,
+                "Cache entry expired, removing entry and hostname mapping from inner cache"
+            );
             cache.with_upgraded(|c| c.remove(server_name));
             {
                 // Remove hostname mapping along with cache entry
@@ -69,19 +80,29 @@ impl Cache {
 
     /// Lookup a cache entry, and attempt to use hostname mapping if it cannot be found by the provided
     /// name.
+    #[tracing::instrument(
+        level = "trace",
+        skip(self),
+        fields(hostname = %hostname)
+    )]
     pub fn lookup(&self, hostname: &str) -> CacheLookup {
+        trace!("Looking for hostname in cache");
         let mut cache = self.inner.upgradable_read();
         if let Some(entry) = cache.get(hostname) {
+            trace!(?entry, "Cache hit");
             if SystemTime::now() < entry.expires_at {
+                trace!(?entry, "Cache entry valid");
                 return CacheLookup::Valid(entry.resolution.clone());
             }
 
+            trace!(?entry, "Cache entry expired, removing from cache");
             let is_override = entry.is_override;
             cache.with_upgraded(|c| c.remove(hostname));
 
             return if is_override {
                 CacheLookup::ExpiredOverride(hostname.to_string())
             } else {
+                trace!("Cache entry expired and not override, treating as cache miss");
                 CacheLookup::Miss
             };
         }
@@ -95,6 +116,7 @@ impl Cache {
         if let Some(server_name) = mapped_server_name
             && let Some(resolution) = self.get(&server_name)
         {
+            trace!(mapped_name = ?server_name, ?resolution, "Cache entry found for hostname mapping");
             return CacheLookup::Valid(resolution);
         }
 
@@ -106,6 +128,7 @@ impl Cache {
     pub fn set(&self, server_name: String, resolution: &Resolution) {
         let sni_hostname = resolution.sni_hostname();
         let is_override = resolution.is_override;
+        trace!(%server_name, %sni_hostname, ?resolution, "Setting cache entry");
 
         {
             let mut cache = self.inner.write();
@@ -118,7 +141,6 @@ impl Cache {
                 },
             );
         }
-        trace!(%server_name, %sni_hostname, resolution = %resolution.destination.hostname(), ?is_override, "setting entry ");
 
         debug_assert!(is_override || (sni_hostname == resolution.destination.hostname()));
 
@@ -131,6 +153,7 @@ impl Cache {
 
     /// Remove a single entry from the cache, returning the previously existing entry if there was one
     pub fn remove_entry(&self, server_name: &str) -> Option<CacheEntry> {
+        tracing::debug!(%server_name, "Removing cache entry");
         let removed = {
             let mut cache = self.inner.write();
             cache.remove(server_name)
@@ -146,6 +169,7 @@ impl Cache {
 
     /// Clear all cache entries. Returns nothing.
     pub fn clear(&self) {
+        tracing::debug!("Clearing cache and hostname map");
         {
             let mut cache = self.inner.write();
             cache.clear();

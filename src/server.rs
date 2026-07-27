@@ -302,11 +302,14 @@ impl MatrixResolver {
         &self,
         server_name: &str,
     ) -> Result<Resolution, ServerResolutionError> {
+        tracing::debug!(?server_name, "Resolving server");
+
         // Check cache first
         if let Some(resolution) = self.cache.get(server_name) {
-            tracing::trace!("Cache hit for {server_name}");
+            tracing::trace!(?server_name, "Cache hit");
             return Ok(resolution);
         }
+        tracing::debug!(?server_name, "Cache miss, resolving normally");
 
         // Perform resolution
         let resolution = self.resolve_actual_dest(server_name).await?;
@@ -484,16 +487,16 @@ impl MatrixResolver {
         }
 
         let url = format!("https://{hostname}/.well-known/matrix/server");
-        tracing::trace!(?url, "Fetching .well-known matrix server");
+        tracing::trace!(?url, "Fetching .well-known/matrix/server");
         let resp = match self.client.get(&url).send().await {
             Ok(resp) => resp,
             Err(error) => {
-                tracing::trace!(?url, ?error, "Failed to fetch well-known matrix server");
+                tracing::trace!(?url, ?error, "Failed to fetch .well-known/matrix/server");
                 return None;
             }
         };
         if resp.status() != StatusCode::OK {
-            tracing::trace!(
+            tracing::debug!(
                 ?url,
                 status = resp.status().as_u16(),
                 "Response status not 200 when fetching .well-known"
@@ -505,10 +508,10 @@ impl MatrixResolver {
             Ok(s) => serde_json::from_slice(&s),
             Err(error) => {
                 tracing::debug!(
-                    ?error,
+                    %error,
                     ?url,
                     limit = MAX_WELL_KNOWN_SIZE,
-                    "Well-known response invalid"
+                    "Invalid well-known response"
                 );
                 return None;
             }
@@ -519,7 +522,7 @@ impl MatrixResolver {
                 tracing::info!(
                     error = %e,
                     url = %url,
-                    "Failed to parse .well-known matrix server JSON"
+                    "Failed to parse well-known into valid JSON"
                 );
                 return None;
             }
@@ -529,7 +532,7 @@ impl MatrixResolver {
             tracing::trace!(
                 ip = %ip,
                 port = ?port,
-                "Parsed .well-known matrix server IP and port"
+                "Parsed IP and port from well-known"
             );
             return Some(WellKnownServerResult::Ip(ip, port));
         }
@@ -537,7 +540,7 @@ impl MatrixResolver {
         tracing::trace!(
             well_known_host = %host,
             well_known_port = ?port,
-            "Parsed .well-known matrix server domain"
+            "Parsed domain (and maybe port) from well-known"
         );
         Some(WellKnownServerResult::Domain(host, port))
     }
@@ -552,8 +555,10 @@ impl MatrixResolver {
         if let Some((host, port)) = server_name.rsplit_once(':')
             && let Ok(port) = u16::from_str(port)
         {
+            tracing::trace!("Server name has port");
             return (host.to_string(), Some(port));
         }
+        tracing::trace!("Server name missing port");
         (server_name.to_string(), None)
     }
 
@@ -572,7 +577,7 @@ impl MatrixResolver {
             format!("_matrix._tcp.{hostname}"),
         ];
         for srv in &srv_names {
-            tracing::trace!(srv = %srv, "Querying SRV record");
+            tracing::trace!(%srv, "Querying SRV record");
             let lookup = self.resolver.srv_lookup(srv).await;
             if let Ok(result) = lookup
                 && let Some(record) = result
@@ -587,12 +592,14 @@ impl MatrixResolver {
                 let was_fed = srv.contains("-fed");
                 let target = record.target.to_utf8();
                 let port = record.port;
+                tracing::trace!(?target, ?was_fed, ?port, %record, %srv, "Got SRV record");
                 return Ok(Some((
                     target.trim_end_matches('.').to_owned(),
                     port,
                     was_fed,
                 )));
             }
+            tracing::trace!(?srv, "No SRV record found")
         }
         tracing::trace!(hostname = %hostname, "No SRV records found for hostname");
         Ok(None)
