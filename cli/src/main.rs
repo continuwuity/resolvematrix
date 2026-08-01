@@ -155,14 +155,11 @@ fn print_output(server: &String, output_data: OutputData, format: OutputFormat) 
                 _ => println!("Server is reachable but did not provide its name or version"),
             }
 
-            match output_data.server_signing_keys {
-                Some(signing_keys) => {
-                    println!("Server has signing keys:");
-                    for (version, key) in signing_keys.verify_keys {
-                        println!("- {version}: {}", key.key);
-                    }
+            if let Some(signing_keys) = output_data.server_signing_keys {
+                println!("Server has signing keys:");
+                for (version, key) in signing_keys.verify_keys {
+                    println!("- {version}: {}", key.key);
                 }
-                None => (),
             }
         }
         OutputFormat::Json => {
