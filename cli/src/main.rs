@@ -1,20 +1,29 @@
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use clap::Parser;
-use resolvematrix::server::MatrixResolver;
+use clap::{Parser, ValueEnum};
+use resolvematrix::{resolution::Resolution, server::MatrixResolver};
 use ruma::{
     api::{
         IncomingResponse, OutgoingRequest,
         auth_scheme::NoAuthentication,
         federation::discovery::{
-            get_server_keys,
+            ServerSigningKeys, get_server_keys,
             get_server_version::{self, v1::Server},
         },
         path_builder::SinglePath,
     },
     exports::http,
+    exports::serde_json,
 };
+use serde::Serialize;
+use tracing::warn;
+
+#[derive(Debug, Clone, ValueEnum, PartialEq)]
+pub(crate) enum OutputFormat {
+    Plain,
+    Json,
+}
 
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -28,6 +37,17 @@ struct Args {
     /// accept such a certificate for federation.
     #[arg(long)]
     allow_invalid_tls_certificates: bool,
+
+    /// Set preferred output format.
+    #[arg(long, default_value = "plain")]
+    format: OutputFormat,
+}
+
+#[derive(Serialize)]
+pub(crate) struct OutputData {
+    resolution: Resolution,
+    server_info: Option<Server>,
+    server_signing_keys: Option<ServerSigningKeys>,
 }
 
 #[tokio::main]
@@ -50,53 +70,42 @@ async fn main() -> Result<()> {
         .await
         .with_context(|| format!("failed to resolve {}", args.server))?;
 
-    println!(
-        "Resolved {} to base URL {} using step {}",
-        args.server,
-        resolution.base_url(),
-        resolution.resolution_step
-    );
-    if resolution.is_override {
-        println!("    Required SNI/Host override is {}", resolution.host);
-    }
+    let mut output_data = OutputData {
+        resolution,
+        server_info: None,
+        server_signing_keys: None,
+    };
 
     let client = RumaClient {
         client: resolver
             .create_client()
             .expect("should be able to create client"),
-        base_url: resolution.base_url(),
+        base_url: output_data.resolution.base_url(),
     };
 
-    let federation_version = client
+    match get_server_info(&client).await {
+        Ok((server_info, server_signing_keys)) => {
+            output_data.server_info = Some(server_info);
+            output_data.server_signing_keys = Some(server_signing_keys);
+        }
+        Err(error) => {
+            warn!(?error, "failed to get server info");
+        }
+    }
+
+    print_output(&args.server, output_data, args.format);
+
+    Ok(())
+}
+
+async fn get_server_info(client: &RumaClient) -> Result<(Server, ServerSigningKeys)> {
+    let server_info = client
         .execute_request(get_server_version::v1::Request::new())
         .await
         .with_context(|| "failed to check server version")?;
 
-    match federation_version.server {
-        Some(Server {
-            name: Some(name),
-            version: Some(version),
-            ..
-        }) => {
-            println!("Server is {name} version {version}");
-        }
-        Some(Server {
-            name: Some(name),
-            version: None,
-            ..
-        }) => {
-            println!("Server is {name} (no version provided)");
-        }
-        Some(Server {
-            name: None,
-            version: Some(version),
-            ..
-        }) => {
-            println!("Server is version {version} (no name provided, for some reason)");
-        }
-        _ => {
-            println!("Server is reachable but did not provide its version");
-        }
+    if server_info.server.is_none() {
+        Err(anyhow::anyhow!("server info is empty"))?
     }
 
     let signing_keys = client
@@ -107,11 +116,61 @@ async fn main() -> Result<()> {
         .deserialize()
         .with_context(|| "failed to deserialize server signing keys")?;
 
-    for (version, key) in &signing_keys.verify_keys {
-        println!("Server key {version} is {}", key.key);
-    }
+    Ok((server_info.server.unwrap(), signing_keys))
+}
 
-    Ok(())
+fn print_output(server: &String, output_data: OutputData, format: OutputFormat) {
+    match format {
+        OutputFormat::Plain => {
+            println!(
+                "Resolved {} to base URL {} using step {}",
+                server,
+                output_data.resolution.base_url(),
+                output_data.resolution.resolution_step
+            );
+            if output_data.resolution.is_override {
+                println!(
+                    "    Required SNI/Host override is {}",
+                    output_data.resolution.host
+                );
+            }
+
+            match output_data.server_info {
+                Some(Server {
+                    name: Some(name),
+                    version: Some(version),
+                    ..
+                }) => println!("Server is {name} version {version}"),
+                Some(Server {
+                    name: Some(name),
+                    version: None,
+                    ..
+                }) => println!("Server is {name} (no version provided)"),
+                Some(Server {
+                    name: None,
+                    version: Some(version),
+                    ..
+                }) => println!("Server is version {version} (no name provided, for some reason)"),
+                None => println!("Server is unreachable"),
+                _ => println!("Server is reachable but did not provide its name or version"),
+            }
+
+            match output_data.server_signing_keys {
+                Some(signing_keys) => {
+                    println!("Server has signing keys:");
+                    for (version, key) in signing_keys.verify_keys {
+                        println!("- {version}: {}", key.key);
+                    }
+                }
+                None => (),
+            }
+        }
+        OutputFormat::Json => {
+            let json = serde_json::to_string_pretty(&output_data)
+                .expect("should be able to serialize to json");
+            println!("{json}")
+        }
+    }
 }
 
 struct RumaClient {
