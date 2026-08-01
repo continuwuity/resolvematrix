@@ -35,8 +35,11 @@ rust-version.workspace = true
 default = ["rustls/ring"]
 aws_lc_rs = ["rustls/aws_lc_rs"]
 
+[workspace.dependencies]
+resolvematrix = { path = ".", default-features = false }
+
 [dependencies]
-hickory-resolver = { version = "0.26.1", default-features = false, features = ["tokio", "system-config"]}
+hickory-resolver = { version = "0.26.1", default-features = false, features = ["tokio", "system-config"] }
 parking_lot = "0.12.5"
 reqwest = { version = "0.13.2", default-features = false, features = ["stream", "json", "rustls-no-provider"] } # JSON only used for tests
 serde = { version = "1.0.228", default-features = false, features = ["serde_derive"] }
@@ -45,6 +48,7 @@ tracing = { version = "0.1.44", default-features = false, features = ["attribute
 futures = { version = "0.3.32", default-features = false }
 num-traits = { version = "0.2.19", default-features = false }
 serde_json = { version = "1.0.150", default-features = false }
+
 
 [dev-dependencies]
 assertables = "10.1.0"
