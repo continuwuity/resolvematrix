@@ -1856,23 +1856,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "resolvematrix"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a68b9735d8c1096d8152d4dfb5a705c0135dd14d181542fd87301f8d3cb4ed03"
-dependencies = [
- "futures",
- "hickory-resolver",
- "num-traits",
- "parking_lot",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
- "tracing",
-]
-
-[[package]]
 name = "resolvematrix-cli"
 version = "1.3.0"
 dependencies = [
