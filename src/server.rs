@@ -388,6 +388,14 @@ impl MatrixResolver {
             });
         }
 
+        #[cfg(feature = "unstable-msc4188")]
+        if let Some(gone_until) = self.gone_until(dest) {
+            if gone_until > SystemTime::now() {
+                return Err(ServerResolutionError::Gone);
+            }
+            self.gone.write().remove(dest);
+        }
+
         // 3. Well-known delegation
         if let Some(res) = self.resolve_well_known(dest).await {
             tracing::debug!(?res, step = "well_known", "Resolved .well-known delegation");
@@ -522,16 +530,13 @@ impl MatrixResolver {
         tracing::trace!(?url, "Fetching .well-known/matrix/server");
         let resp = match self.client.get(&url).send().await {
             Ok(resp) => resp,
-            #[cfg(feature = "unstable-msc4188")]
-            Err(error) if error.status() == Some(StatusCode::GONE) => {
-                tracing::trace!(?url, ?error, "Server advertises that it is gone");
-                return Some(WellKnownServerResult::Gone);
-            }
             Err(error) => {
                 tracing::trace!(?url, ?error, "Failed to fetch .well-known/matrix/server");
                 return None;
             }
         };
+
+        #[cfg(not(feature = "unstable-msc4188"))]
         if resp.status() != StatusCode::OK {
             tracing::debug!(
                 ?url,
@@ -539,6 +544,22 @@ impl MatrixResolver {
                 "Response status not 200 when fetching .well-known"
             );
             return None;
+        }
+        #[cfg(feature = "unstable-msc4188")]
+        match resp.status() {
+            StatusCode::OK => {}
+            StatusCode::GONE => {
+                tracing::trace!(?url, "Server advertises that it is gone");
+                return Some(WellKnownServerResult::Gone);
+            }
+            status => {
+                tracing::debug!(
+                    ?url,
+                    status = status.as_u16(),
+                    "Response status not 200 when fetching .well-known"
+                );
+                return None;
+            }
         }
 
         let json_data = match resp.limit_read().await {
@@ -1319,8 +1340,8 @@ pub(crate) mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_gone() {
-        use std::time::Instant;
         use assertables::assert_le;
+        use std::time::Instant;
 
         init_tracing();
 
