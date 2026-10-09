@@ -1,7 +1,13 @@
+#[cfg(feature = "unstable-msc4188")]
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+#[cfg(feature = "unstable-msc4188")]
+use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+#[cfg(feature = "unstable-msc4188")]
+use std::time::SystemTime;
 
 use crate::cache::{Cache, CacheEntry, CacheLookup};
 use crate::error::{InvalidBuilderOption, ServerResolutionError, ServerResolverBuilderError};
@@ -10,6 +16,8 @@ use futures::StreamExt;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::proto::rr::RData;
 use num_traits::ToPrimitive;
+#[cfg(feature = "unstable-msc4188")]
+use parking_lot::RwLock;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use serde_json;
@@ -183,6 +191,8 @@ impl MatrixResolverBuilder {
             client,
             resolver,
             cache,
+            #[cfg(feature = "unstable-msc4188")]
+            gone: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 }
@@ -192,6 +202,8 @@ pub struct MatrixResolver {
     client: Client,
     resolver: Arc<TokioResolver>,
     cache: Cache,
+    #[cfg(feature = "unstable-msc4188")]
+    gone: Arc<RwLock<HashMap<String, SystemTime>>>,
 }
 
 impl MatrixResolver {
@@ -329,6 +341,18 @@ impl MatrixResolver {
         fields(dest = %dest)
     )]
     async fn resolve_actual_dest(&self, dest: &str) -> Result<Resolution, ServerResolutionError> {
+        #[cfg(feature = "unstable-msc4188")]
+        if let mut guard = self.gone.upgradable_read()
+            && let Some(expires) = guard.get(dest)
+        {
+            if *expires < SystemTime::now() {
+                return Err(ServerResolutionError::Gone);
+            }
+            // Remove the stale entry
+            guard.with_upgraded(|gone| {
+                gone.remove(dest);
+            });
+        }
         // 1. If the hostname is an IP literal
         if let Some((ip, port)) = get_ip_with_port(dest) {
             tracing::debug!(
@@ -438,7 +462,13 @@ impl MatrixResolver {
                     }
                 }
                 #[cfg(feature = "unstable-msc4188")]
-                WellKnownServerResult::Gone => Err(ServerResolutionError::Gone),
+                WellKnownServerResult::Gone => {
+                    self.gone.write().insert(
+                        dest.to_owned(),
+                        SystemTime::now().add(Duration::from_secs(3600 * 24 * 90)),
+                    );
+                    Err(ServerResolutionError::Gone)
+                }
             };
         }
 
@@ -622,15 +652,48 @@ impl MatrixResolver {
         self.cache.remove_entry(hostname)
     }
 
-    /// Clear entire cache
+    /// Removes a specific server from the [MSC4188] gone cache.
+    #[cfg(feature = "unstable-msc4188")]
+    pub fn remove_gone_entry(&self, hostname: &str) {
+        self.gone.write().remove(hostname);
+    }
+
+    /// Clear the entire cache
     #[tracing::instrument(level = "trace", skip(self))]
     pub fn clear_cache(&self) {
-        self.cache.clear()
+        self.cache.clear();
+    }
+
+    /// Clears the internal [MSC4188] gone cache
+    ///
+    /// [MSC4188]: https://github.com/matrix-org/matrix-spec-proposals/pull/4188
+    #[cfg(feature = "unstable-msc4188")]
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub fn clear_gone_cache(&self) {
+        self.gone.write().clear();
     }
 
     #[tracing::instrument(level = "trace", skip(self))]
     pub fn get_all_cache_entries(&self) -> Vec<(String, CacheEntry)> {
         self.cache.get_all()
+    }
+
+    /// Get all entries in the [MSC4188] gone cache.
+    ///
+    /// [MSC4188]: https://github.com/matrix-org/matrix-spec-proposals/pull/4188
+    #[cfg(feature = "unstable-msc4188")]
+    #[tracing::instrument(level = "trace", skip(self))]
+    pub fn get_all_gone_entries(&self) -> Vec<(String, SystemTime)> {
+        self.gone.read().clone().into_iter().collect()
+    }
+
+    /// Get the `SystemTime` at which point the given server name is considered "gone" until.
+    ///
+    /// Returns `None` if the server is not gone.
+    /// Servers should not be contacted until the resulting `SystemTime` if it is `Some`.
+    #[cfg(feature = "unstable-msc4188")]
+    pub fn gone_until(&self, server_name: &str) -> Option<SystemTime> {
+        self.gone.read().get(server_name).cloned()
     }
 }
 
@@ -1250,5 +1313,26 @@ pub(crate) mod tests {
         let second_response = resolver.resolve_server(server_name).await;
         assert_ok!(&second_response);
         assert_eq!(response.unwrap(), second_response.unwrap());
+    }
+
+    #[cfg(feature = "unstable-msc4188")]
+    #[rstest]
+    #[tokio::test]
+    async fn test_gone() {
+        use std::time::Instant;
+        use assertables::assert_le;
+
+        init_tracing();
+
+        let resolver = Arc::new(MatrixResolver::new().unwrap());
+        // This server always returns HTTP 410 to `/.well-known/matrix/server`
+        let server_name = "graveyard.matrix.nexy7574.co.uk";
+        let response = resolver.resolve_server(server_name).await;
+        assert!(matches!(response, Err(ServerResolutionError::Gone)));
+        // Querying the server again should immediately get bounced
+        let now = Instant::now();
+        let response = resolver.resolve_server(server_name).await;
+        assert!(matches!(response, Err(ServerResolutionError::Gone)));
+        assert_le!(now.elapsed().as_millis(), 50);
     }
 }
