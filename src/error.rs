@@ -5,6 +5,9 @@ use thiserror::Error;
 pub enum ServerResolutionError {
     #[error("DNS resolution error: {0}")]
     Dns(#[from] hickory_resolver::net::NetError),
+    #[cfg(feature = "unstable-msc4188")]
+    #[error("Server is gone")]
+    Gone,
 }
 
 /// Error type for Matrix server resolution.

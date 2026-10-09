@@ -34,6 +34,7 @@ rust-version.workspace = true
 [features]
 default = ["rustls/ring"]
 aws_lc_rs = ["rustls/aws_lc_rs"]
+unstable-msc4188 = []
 
 [workspace.dependencies]
 resolvematrix = { path = ".", default-features = false }

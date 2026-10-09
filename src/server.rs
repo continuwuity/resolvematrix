@@ -437,6 +437,8 @@ impl MatrixResolver {
                         })
                     }
                 }
+                #[cfg(feature = "unstable-msc4188")]
+                WellKnownServerResult::Gone => Err(ServerResolutionError::Gone),
             };
         }
 
@@ -490,6 +492,11 @@ impl MatrixResolver {
         tracing::trace!(?url, "Fetching .well-known/matrix/server");
         let resp = match self.client.get(&url).send().await {
             Ok(resp) => resp,
+            #[cfg(feature = "unstable-msc4188")]
+            Err(error) if error.status() == Some(StatusCode::GONE) => {
+                tracing::trace!(?url, ?error, "Server advertises that it is gone");
+                return Some(WellKnownServerResult::Gone);
+            }
             Err(error) => {
                 tracing::trace!(?url, ?error, "Failed to fetch .well-known/matrix/server");
                 return None;
@@ -676,6 +683,8 @@ impl LimitReadExt for reqwest::Response {
 enum WellKnownServerResult {
     Ip(IpAddr, Option<u16>),
     Domain(String, Option<u16>),
+    #[cfg(feature = "unstable-msc4188")]
+    Gone,
 }
 
 /// If the string is an IP literal (with optional port), returns (`IpAddr`, port).
