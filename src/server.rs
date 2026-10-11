@@ -536,18 +536,9 @@ impl MatrixResolver {
             }
         };
 
-        #[cfg(not(feature = "unstable-msc4188"))]
-        if resp.status() != StatusCode::OK {
-            tracing::debug!(
-                ?url,
-                status = resp.status().as_u16(),
-                "Response status not 200 when fetching .well-known"
-            );
-            return None;
-        }
-        #[cfg(feature = "unstable-msc4188")]
         match resp.status() {
             StatusCode::OK => {}
+            #[cfg(feature = "unstable-msc4188")]
             StatusCode::GONE => {
                 tracing::trace!(?url, "Server advertises that it is gone");
                 return Some(WellKnownServerResult::Gone);
@@ -556,7 +547,7 @@ impl MatrixResolver {
                 tracing::debug!(
                     ?url,
                     status = status.as_u16(),
-                    "Response status not 200 when fetching .well-known"
+                    "Unknown response status when fetching .well-known"
                 );
                 return None;
             }
