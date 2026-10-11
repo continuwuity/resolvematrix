@@ -1339,7 +1339,8 @@ pub(crate) mod tests {
     #[cfg(feature = "unstable-msc4188")]
     #[rstest]
     #[tokio::test]
-    async fn test_gone() {
+    #[case::nexy7574_graveyard("graveyard.matrix.nexy7574.co.uk")]
+    async fn test_gone(#[case] server_name: &str) {
         use assertables::assert_le;
         use std::time::Instant;
 
@@ -1347,7 +1348,6 @@ pub(crate) mod tests {
 
         let resolver = Arc::new(MatrixResolver::new().unwrap());
         // This server always returns HTTP 410 to `/.well-known/matrix/server`
-        let server_name = "graveyard.matrix.nexy7574.co.uk";
         let response = resolver.resolve_server(server_name).await;
         assert!(matches!(response, Err(ServerResolutionError::Gone)));
         // Querying the server again should immediately get bounced
