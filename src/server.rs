@@ -674,6 +674,8 @@ impl MatrixResolver {
     }
 
     /// Removes a specific server from the [MSC4188] gone cache.
+    ///
+    /// [MSC4188]: https://github.com/matrix-org/matrix-spec-proposals/pull/4188
     #[cfg(feature = "unstable-msc4188")]
     pub fn remove_gone_entry(&self, hostname: &str) {
         self.gone.write().remove(hostname);
