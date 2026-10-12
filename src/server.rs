@@ -12,7 +12,6 @@ use std::time::SystemTime;
 use crate::cache::{Cache, CacheEntry, CacheLookup};
 use crate::error::{InvalidBuilderOption, ServerResolutionError, ServerResolverBuilderError};
 use crate::resolution::{Resolution, ResolutionStep, ResolvedDestination};
-use futures_util::StreamExt;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::proto::rr::RData;
 use num_traits::ToPrimitive;
@@ -21,6 +20,7 @@ use parking_lot::RwLock;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use serde_json;
+use tokio_stream::StreamExt;
 
 /// A custom DNS resolver for `reqwest` that handles Matrix server name resolution.
 ///
