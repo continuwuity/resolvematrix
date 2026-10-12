@@ -12,7 +12,7 @@ use std::time::SystemTime;
 use crate::cache::{Cache, CacheEntry, CacheLookup};
 use crate::error::{InvalidBuilderOption, ServerResolutionError, ServerResolverBuilderError};
 use crate::resolution::{Resolution, ResolutionStep, ResolvedDestination};
-use futures::StreamExt;
+use futures_util::StreamExt;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::proto::rr::RData;
 use num_traits::ToPrimitive;
