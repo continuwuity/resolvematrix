@@ -5,11 +5,15 @@
 //!
 //! This library depends on `hickory-resolver`, `reqwest`, `serde` and (indirectly) `tokio`.
 //!
+//! This repository includes a minimal implementation of the library in the form of a command-line tool.
+//!
 //! # Usage
+//!
+//! ## Library
 //!
 //! `cargo add resolvematrix`
 //!
-//! ## Example
+//! ### Example
 //!
 //! ```rust,no_run
 //! use resolvematrix::server::{MatrixResolver, MatrixResolverBuilder};
