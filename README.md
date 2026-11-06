@@ -15,11 +15,15 @@ The library is tested against the https://resolvematrix.dev suite and other live
 
 This library depends on `hickory-resolver`, `reqwest`, `serde` and (indirectly) `tokio`.
 
+This repository includes a minimal implementation of the library in the form of a command-line tool.
+
 ## Usage
+
+### Library
 
 `cargo add resolvematrix`
 
-### Example
+#### Example
 
 ```rust
 use resolvematrix::server::{MatrixResolver, MatrixResolverBuilder};
@@ -41,6 +45,22 @@ let response = client.get(&url).send().await;
 ```
 
 For more examples, see the [examples](https://forgejo.ellis.link/continuwuation/resolvematrix/src/branch/main/examples) directory.
+
+### CLI
+
+The CLI is currently available as an RPM package through Terra for all of the same Linux distributions as described on [Continuwuity's RPM installation page](https://continuwuity.org/deploying/rpm.html), except for SUSE.
+
+To obtain the package, follow the directions on that page, but use `resolvematrix` as the package to install.
+
+#### Example
+
+```shell
+$ resolvematrix continuwuity.org
+Resolved continuwuity.org to base URL https://matrix.continuwuity.org:443 using step 3.2 (WellKnownHostPort)
+Server is continuwuity version 26.9.1 (ddbdd1e)
+Server has signing keys:
+- ed25519:PwHlNsFu: 8eNx2s0zWW+heKAmOH5zKv/nCPkEpraDJfGHxDu6hFI
+```
 
 ## Contributing
 
