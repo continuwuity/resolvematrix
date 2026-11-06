@@ -48,9 +48,29 @@ For more examples, see the [examples](https://forgejo.ellis.link/continuwuation/
 
 ### CLI
 
-The CLI is currently available as an RPM package through Terra for all of the same Linux distributions as described on [Continuwuity's RPM installation page](https://continuwuity.org/deploying/rpm.html), except for SUSE.
+The CLI is currently available as follows:
 
-To obtain the package, follow the directions on that page, but use `resolvematrix` as the package to install.
+#### RPM
+
+`resolvematrix` is available as an RPM package through Terra for all of the same Linux distributions as described on [Continuwuity's RPM installation page](https://continuwuity.org/deploying/rpm.html), except for SUSE.
+
+To install, follow [Terra's directions for adding the Terra repo on your distribution](https://docs.terrapkg.com/usage/installing/) (note that no subrepos are required for this package), then run `sudo dnf install resolvematrix`.
+
+#### Nix
+
+`resolvematrix` is available from Nixpkgs. To obtain and run the CLI through Nix, you can:
+
+- Run `nix run nixpkgs#resolvematrix`, or
+- Add `pkgs.resolvematrix` to your system configuration
+
+#### Other platforms
+
+`resolvematrix` can be compiled from source on most platforms supported by both [AWS-LC](https://github.com/aws/aws-lc#platform-support) (on which this tool partially depends) and the [Rust compiler (with std support)](https://doc.rust-lang.org/rustc/platform-support.html).
+
+This can be accomplished by one of the following methods:
+
+- Cloning this repository, navigating to the `cli/` subdirectory, and running `cargo build --release`
+- Running the following one-liner, without needing to clone the repository: `cargo install --git https://forgejo.ellis.link/continuwuation/resolvematrix resolvematrix-cli`
 
 #### Example
 
