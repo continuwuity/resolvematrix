@@ -166,17 +166,19 @@ impl MatrixResolverBuilder {
     ///
     /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
     pub fn build(self) -> Result<MatrixResolver, ServerResolverBuilderError> {
-        let client = self.http_client.unwrap_or(
-            Client::builder()
+        let client = match self.http_client {
+            Some(client) => client,
+            None => Client::builder()
                 .tls_danger_accept_invalid_certs(self.dangerous_tls_accept_invalid_certs)
                 .timeout(Duration::from_secs(10))
                 .build()
                 .map_err(ServerResolverBuilderError::HttpClientBuilder)?,
-        );
+        };
 
-        let resolver = self.dns_resolver.unwrap_or(Arc::new(
-            hickory_resolver::Resolver::builder_tokio()?.build()?,
-        ));
+        let resolver = match self.dns_resolver {
+            Some(resolver) => resolver,
+            None => Arc::new(hickory_resolver::Resolver::builder_tokio()?.build()?),
+        };
 
         if self.resolution_cache.is_some() && self.cache_ttl.is_some() {
             return Err(ServerResolverBuilderError::InvalidBuilderOptions(
