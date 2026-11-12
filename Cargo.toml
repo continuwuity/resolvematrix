@@ -3,7 +3,7 @@ members = ["cli"]
 resolver = "3"
 
 [workspace.package]
-version = "1.4.1"
+version = "1.4.2"
 description = "Resolve Matrix servers"
 license = "MPL-2.0"
 authors = [
