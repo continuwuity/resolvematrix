@@ -193,6 +193,7 @@ impl MatrixResolverBuilder {
             client,
             resolver,
             cache,
+            dangerous_tls_accept_invalid_certs: self.dangerous_tls_accept_invalid_certs,
             #[cfg(feature = "unstable-msc4188")]
             gone: Arc::new(RwLock::new(HashMap::new())),
         })
@@ -204,6 +205,7 @@ pub struct MatrixResolver {
     client: Client,
     resolver: Arc<TokioResolver>,
     cache: Cache,
+    dangerous_tls_accept_invalid_certs: bool,
     #[cfg(feature = "unstable-msc4188")]
     gone: Arc<RwLock<HashMap<String, SystemTime>>>,
 }
@@ -279,7 +281,9 @@ impl MatrixResolver {
     ///
     /// Returns an error if the client cannot be built.
     pub fn create_client(self: &Arc<Self>) -> Result<Client, ServerResolverBuilderError> {
-        let builder = Client::builder().timeout(Duration::from_secs(10));
+        let builder = Client::builder()
+            .timeout(Duration::from_secs(10))
+            .danger_accept_invalid_certs(self.dangerous_tls_accept_invalid_certs);
         self.create_client_with_builder(builder)
     }
 
