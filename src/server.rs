@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
-use std::time::Duration;
 #[cfg(feature = "unstable-msc4188")]
 use std::time::SystemTime;
+use std::time::{Duration, Instant};
 
 use crate::cache::{Cache, CacheEntry, CacheLookup};
 use crate::error::{
@@ -25,11 +25,37 @@ use tracing::{debug, trace, warn};
 
 /// How long to cache a resolution for if no value is provided in
 /// Cache-Control (.well-known resolution) or as TTL (DNS SRV).
+///
+/// From the [Server discovery specification](https://spec.matrix.org/v1.19/server-server-api/#resolving-server-names):
+/// > The recommended sensible default is 24 hours.
 pub(crate) const DEFAULT_CACHE_DURATION: Duration = Duration::from_secs(60 * 60 * 24);
 
 /// Maximum allowable cache duration set from Cache-Control (.well-known resolution)
 /// or TTL (DNS SRV).
-pub(crate) const MAXIMUM_CACHE_DURATION: Duration = Duration::from_secs(60 * 60 * 24 * 90);
+///
+/// From the [Server discovery specification](https://spec.matrix.org/v1.18/server-server-api/#resolving-server-names):
+/// > Servers should additionally impose a maximum cache time for responses: 48 hours is recommended.
+pub(crate) const MAXIMUM_CACHE_DURATION: Duration = Duration::from_secs(60 * 60 * 48);
+
+/// The minimum amount of time a DNS SRV record has to be valid
+/// for it to be considered instead of the default duration.
+const MINIMUM_DNS_SRV_TTL: Duration = Duration::from_secs(60 * 10);
+
+/// How long to cache a 410 Gone result
+///
+/// From [MSC4188](https://github.com/matrix-org/matrix-spec-proposals/pull/4188/changes#diff-db67464a0a14d7e093421cc6654f9b59d1c4c0b4ccaae82601924e0922788e9bR33-R35):
+/// > This MSC recommends homeservers *should* wait a minimum of 24 hours and *should* wait no longer
+/// > than 90 days, balancing the need to respect the server's intent to be offline whilst allowing for
+/// > potential future changes in server operation or domain ownership.
+#[cfg(feature = "unstable-msc4188")]
+pub(crate) const GONE_CACHE_DURATION: Duration = Duration::from_secs(60 * 60 * 24 * 90);
+
+struct SrvRecordResult {
+    srv_host: String,
+    srv_port: u16,
+    was_fed: bool,
+    ttl: Option<Duration>,
+}
 
 /// A custom DNS resolver for `reqwest` that handles Matrix server name resolution.
 ///
@@ -209,10 +235,6 @@ impl MatrixResolverBuilder {
     }
 }
 
-/// How long to cache a 410 Gone response for .well-known resolutions
-#[cfg(feature = "unstable-msc4188")]
-const WELL_KNOWN_GONE_CACHE_DURATION: Duration = Duration::from_secs(60 * 60 * 24 * 90);
-
 /// The main resolver struct for Matrix server resolution.
 pub struct MatrixResolver {
     client: Client,
@@ -343,10 +365,10 @@ impl MatrixResolver {
         debug!(?server_name, "Cache miss, resolving normally");
 
         // Perform resolution
-        let resolution = self.resolve_actual_dest(server_name).await?;
+        let (resolution, ttl) = self.resolve_actual_dest(server_name).await?;
 
         // Cache the result
-        self.cache.set(server_name.to_string(), &resolution);
+        self.cache.set(server_name.to_string(), &resolution, ttl);
 
         Ok(resolution)
     }
@@ -360,7 +382,7 @@ impl MatrixResolver {
         skip(self),
         fields(dest = %dest)
     )]
-    async fn resolve_actual_dest(&self, dest: &str) -> Result<Resolution, ServerResolutionError> {
+    async fn resolve_actual_dest(&self, dest: &str) -> Result<(Resolution, Option<Duration>), ServerResolutionError> {
         // 1. If the hostname is an IP literal
         if let Some((ip, port)) = get_ip_with_port(dest) {
             debug!(
@@ -370,12 +392,15 @@ impl MatrixResolver {
                 "Resolved IP literal with port"
             );
             let socket = SocketAddr::new(ip, port.unwrap_or(8448));
-            return Ok(Resolution {
-                destination: ResolvedDestination::Literal(socket),
-                host: dest.to_owned(),
-                is_override: false,
-                resolution_step: ResolutionStep::IPLiteral,
-            });
+            return Ok((
+                Resolution {
+                    destination: ResolvedDestination::Literal(socket),
+                    host: dest.to_owned(),
+                    is_override: false,
+                    resolution_step: ResolutionStep::IPLiteral,
+                },
+                None,
+            ));
         }
 
         // 2. Hostname with explicit port
@@ -388,12 +413,18 @@ impl MatrixResolver {
                 step = "explicit_port",
                 "Resolved hostname with explicit port"
             );
-            return Ok(Resolution {
-                destination: ResolvedDestination::Named(host_part.to_owned(), port_str.to_owned()),
-                host: dest.to_owned(),
-                is_override: false,
-                resolution_step: ResolutionStep::HostPort,
-            });
+            return Ok((
+                Resolution {
+                    destination: ResolvedDestination::Named(
+                        host_part.to_owned(),
+                        port_str.to_owned(),
+                    ),
+                    host: dest.to_owned(),
+                    is_override: false,
+                    resolution_step: ResolutionStep::HostPort,
+                },
+                None,
+            ));
         }
 
         #[cfg(feature = "unstable-msc4188")]
@@ -410,7 +441,7 @@ impl MatrixResolver {
         }
 
         // 3. Well-known delegation
-        if let Some(res) = self.resolve_well_known(dest).await {
+        if let (Some(res), ttl) = self.resolve_well_known(dest).await {
             debug!(?res, step = "well_known", "Resolved .well-known delegation");
             return match res {
                 // 3.1: delegated_hostname is an IP literal, optionally with port else default
@@ -422,12 +453,15 @@ impl MatrixResolver {
                         "Resolved .well-known IP literal"
                     );
                     let socket = SocketAddr::new(ip, port.unwrap_or(8448));
-                    Ok(Resolution {
-                        destination: ResolvedDestination::Literal(socket),
-                        host: dest.to_owned(),
-                        is_override: false,
-                        resolution_step: ResolutionStep::WellKnownIPLiteral,
-                    })
+                    Ok((
+                        Resolution {
+                            destination: ResolvedDestination::Literal(socket),
+                            host: dest.to_owned(),
+                            is_override: false,
+                            resolution_step: ResolutionStep::WellKnownIPLiteral,
+                        },
+                        ttl,
+                    ))
                 }
                 // 3.2: Hostname with explicit port in .well-known
                 WellKnownServerResult::Domain(domain, Some(port)) => {
@@ -437,17 +471,27 @@ impl MatrixResolver {
                         step = "well_known_domain",
                         "Resolved .well-known domain with port"
                     );
-                    Ok(Resolution {
-                        destination: ResolvedDestination::Named(domain.clone(), port.to_string()),
-                        host: format!("{domain}:{port}"),
-                        is_override: false,
-                        resolution_step: ResolutionStep::WellKnownHostPort,
-                    })
+                    Ok((
+                        Resolution {
+                            destination: ResolvedDestination::Named(
+                                domain.clone(),
+                                port.to_string(),
+                            ),
+                            host: format!("{domain}:{port}"),
+                            is_override: false,
+                            resolution_step: ResolutionStep::WellKnownHostPort,
+                        },
+                        ttl,
+                    ))
                 }
                 WellKnownServerResult::Domain(domain, None) => {
                     // 3.3/3.4: Hostname, no port in .well-known
-                    if let Some((srv_host, srv_port, was_fed)) =
-                        self.query_srv_record(&domain).await?
+                    if let Some(SrvRecordResult {
+                        srv_host,
+                        srv_port,
+                        was_fed,
+                        ttl,
+                    }) = self.query_srv_record(&domain).await?
                     {
                         debug!(
                             srv_host = %srv_host,
@@ -455,15 +499,22 @@ impl MatrixResolver {
                             step = "well_known_host_srv",
                             "Resolved SRV from .well-known hostname without port"
                         );
-                        Ok(Resolution {
-                            destination: ResolvedDestination::Named(srv_host, srv_port.to_string()),
-                            host: domain,
-                            is_override: true,
-                            resolution_step: match was_fed {
-                                true => ResolutionStep::WellKnownSrvMatrixFed,
-                                false => ResolutionStep::WellKnownSrvMatrix,
+
+                        Ok((
+                            Resolution {
+                                destination: ResolvedDestination::Named(
+                                    srv_host,
+                                    srv_port.to_string(),
+                                ),
+                                host: domain,
+                                is_override: true,
+                                resolution_step: match was_fed {
+                                    true => ResolutionStep::WellKnownSrvMatrixFed,
+                                    false => ResolutionStep::WellKnownSrvMatrix,
+                                },
                             },
-                        })
+                            ttl,
+                        ))
                     } else {
                         // 3.5: No SRV, fallback to A/AAAA/CNAME + 8448
                         trace!(
@@ -471,45 +522,56 @@ impl MatrixResolver {
                             step = "well_known_fallback",
                             "Fallback to .well-known host with default port"
                         );
-                        Ok(Resolution {
-                            destination: ResolvedDestination::Named(
-                                domain.clone(),
-                                "8448".to_owned(),
-                            ),
-                            host: domain,
-                            is_override: true,
-                            resolution_step: ResolutionStep::WellKnownDefaultPort,
-                        })
+                        Ok((
+                            Resolution {
+                                destination: ResolvedDestination::Named(
+                                    domain.clone(),
+                                    "8448".to_owned(),
+                                ),
+                                host: domain,
+                                is_override: true,
+                                resolution_step: ResolutionStep::WellKnownDefaultPort,
+                            },
+                            None,
+                        ))
                     }
                 }
                 #[cfg(feature = "unstable-msc4188")]
                 WellKnownServerResult::Gone => {
-                    self.gone.write().insert(
-                        dest.to_owned(),
-                        SystemTime::now() + WELL_KNOWN_GONE_CACHE_DURATION,
-                    );
+                    self.gone
+                        .write()
+                        .insert(dest.to_owned(), SystemTime::now() + GONE_CACHE_DURATION);
                     Err(ServerResolutionError::Gone)
                 }
             };
         }
 
         // 4/5. SRV lookup on original hostname
-        if let Some((srv_host, srv_port, was_fed)) = self.query_srv_record(dest).await? {
+        if let Some(SrvRecordResult {
+            srv_host,
+            srv_port,
+            was_fed,
+            ttl,
+        }) = self.query_srv_record(dest).await? {
             trace!(
                 srv_host = %srv_host,
                 srv_port = srv_port,
                 step = "srv_lookup",
                 "Resolved SRV record on original hostname"
             );
-            return Ok(Resolution {
-                destination: ResolvedDestination::Named(srv_host, srv_port.to_string()),
-                host: dest.to_owned(),
-                is_override: true,
-                resolution_step: match was_fed {
-                    true => ResolutionStep::SrvMatrixFed,
-                    false => ResolutionStep::SrvMatrix,
+
+            return Ok((
+                Resolution {
+                    destination: ResolvedDestination::Named(srv_host, srv_port.to_string()),
+                    host: dest.to_owned(),
+                    is_override: true,
+                    resolution_step: match was_fed {
+                        true => ResolutionStep::SrvMatrixFed,
+                        false => ResolutionStep::SrvMatrix,
+                    },
                 },
-            });
+                ttl,
+            ));
         }
 
         // 6. Fallback: A/AAAA/CNAME + 8448
@@ -518,12 +580,15 @@ impl MatrixResolver {
             step = "fallback",
             "Fallback to original hostname with default port"
         );
-        Ok(Resolution {
-            destination: ResolvedDestination::Named(dest.to_owned(), "8448".to_owned()),
-            host: dest.to_owned(),
-            is_override: false,
-            resolution_step: ResolutionStep::DefaultPort,
-        })
+        Ok((
+            Resolution {
+                destination: ResolvedDestination::Named(dest.to_owned(), "8448".to_owned()),
+                host: dest.to_owned(),
+                is_override: false,
+                resolution_step: ResolutionStep::DefaultPort,
+            },
+            None,
+        ))
     }
 
     /// Resolve .well-known delegation for a hostname.
@@ -532,7 +597,10 @@ impl MatrixResolver {
         skip(self),
         fields(hostname = %hostname)
     )]
-    async fn resolve_well_known(&self, hostname: &str) -> Option<WellKnownServerResult> {
+    async fn resolve_well_known(
+        &self,
+        hostname: &str,
+    ) -> (Option<WellKnownServerResult>, Option<Duration>) {
         #[derive(Deserialize)]
         struct WellKnown {
             #[serde(rename = "m.server")]
@@ -545,7 +613,7 @@ impl MatrixResolver {
             Ok(resp) => resp,
             Err(error) => {
                 trace!(?url, ?error, "Failed to fetch .well-known/matrix/server");
-                return None;
+                return (None, None);
             }
         };
 
@@ -554,7 +622,7 @@ impl MatrixResolver {
             #[cfg(feature = "unstable-msc4188")]
             StatusCode::GONE => {
                 trace!(?url, "Server advertises that it is gone");
-                return Some(WellKnownServerResult::Gone);
+                return (Some(WellKnownServerResult::Gone), None);
             }
             status => {
                 debug!(
@@ -562,9 +630,18 @@ impl MatrixResolver {
                     status = status.as_u16(),
                     "Unknown response status when fetching .well-known"
                 );
-                return None;
+                return (None, None);
             }
         }
+
+        let cache_control_header = resp.headers().get("cache-control");
+        let cache_control_duration = if let Some(header) = cache_control_header
+            && let Some(header_str) = header.to_str().ok()
+        {
+            parse_cache_control(header_str)
+        } else {
+            None
+        };
 
         let json_data = match resp.limit_read().await {
             Ok(s) => serde_json::from_slice(&s),
@@ -575,7 +652,7 @@ impl MatrixResolver {
                     limit = MAX_WELL_KNOWN_SIZE,
                     "Invalid well-known response"
                 );
-                return None;
+                return (None, None);
             }
         };
         let wk: WellKnown = match json_data {
@@ -586,7 +663,7 @@ impl MatrixResolver {
                     url = %url,
                     "Failed to parse well-known into valid JSON"
                 );
-                return None;
+                return (None, None);
             }
         };
 
@@ -596,7 +673,10 @@ impl MatrixResolver {
                 port = ?port,
                 "Parsed IP and port from well-known"
             );
-            return Some(WellKnownServerResult::Ip(ip, port));
+            return (
+                Some(WellKnownServerResult::Ip(ip, port)),
+                cache_control_duration,
+            );
         }
         let (host, port) = Self::parse_server_name(&wk.m_server);
         trace!(
@@ -604,7 +684,10 @@ impl MatrixResolver {
             well_known_port = ?port,
             "Parsed domain (and maybe port) from well-known"
         );
-        Some(WellKnownServerResult::Domain(host, port))
+        (
+            Some(WellKnownServerResult::Domain(host, port)),
+            cache_control_duration,
+        )
     }
 
     /// Parses a Matrix server name into `(hostname, Option<port>)`
@@ -624,16 +707,13 @@ impl MatrixResolver {
         (server_name.to_string(), None)
     }
 
-    /// Query SRV records for a hostname, returning (target, port) if found.
+    /// Query the provided hostname for matrix SRV records
     #[tracing::instrument(
         level = "trace",
         skip(self),
         fields(hostname = %hostname)
     )]
-    async fn query_srv_record(
-        &self,
-        hostname: &str,
-    ) -> Result<Option<(String, u16, bool)>, ServerResolutionError> {
+    async fn query_srv_record(&self, hostname: &str) -> Result<Option<SrvRecordResult>, ServerResolutionError> {
         let srv_names = [
             format!("_matrix-fed._tcp.{hostname}"),
             format!("_matrix._tcp.{hostname}"),
@@ -654,16 +734,26 @@ impl MatrixResolver {
                 let was_fed = srv.contains("-fed");
                 let target = record.target.to_utf8();
                 let port = record.port;
+                let ttl = {
+                    let diff = result.valid_until() - Instant::now();
+
+                    if diff < MINIMUM_DNS_SRV_TTL {
+                        None
+                    } else {
+                        Some(diff)
+                    }
+                };
                 trace!(?target, ?was_fed, ?port, %record, %srv, "Got SRV record");
-                return Ok(Some((
-                    target.trim_end_matches('.').to_owned(),
-                    port,
+                return Ok(Some(SrvRecordResult {
+                    srv_host: target.trim_end_matches('.').to_owned(),
+                    srv_port: port,
                     was_fed,
-                )));
+                    ttl
+                }));
             }
             trace!(?srv, "No SRV record found")
         }
-        trace!(hostname = %hostname, "No SRV records found for hostname");
+        trace!("No SRV records found for hostname");
         Ok(None)
     }
 
@@ -802,6 +892,53 @@ fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
         return Some((ip, None));
     }
     debug!(input = %s, "Input is not an IP literal");
+    None
+}
+
+/// Parses a `Cache-Control` header to get the value of the `max-age` directive as a Duration
+#[tracing::instrument(
+    name = "parse_cache_control",
+    level = "trace",
+    fields(%header)
+)]
+fn parse_cache_control(header: &str) -> Option<Duration> {
+    trace!("Parsing Cache-Control header");
+
+    let directives: Vec<String> = header
+        .split(',')
+        .map(|part| {
+            // Remove whitespace from the directive
+            part.chars()
+                .filter(|c| !c.is_whitespace())
+                .collect::<String>()
+        })
+        .collect();
+
+    for directive in directives {
+        trace!(
+            %directive,
+            "Attempting to parse directive"
+        );
+
+        let Some(seconds) = directive.strip_prefix("max-age=") else {
+            trace!(?directive, "Component is not max-age, skipping");
+            continue;
+        };
+
+        return match seconds.parse::<u64>() {
+            Ok(seconds) => {
+                let duration = Duration::from_secs(seconds);
+                debug!(%directive, ?duration, "Parsed Cache-Control directive");
+                Some(duration)
+            }
+            Err(_) => {
+                warn!(%directive, "Could not parse max-age as u64, using default duration");
+                None
+            }
+        };
+    }
+
+    debug!("Cache-Control header does not contain a max-age directive");
     None
 }
 
@@ -1267,17 +1404,17 @@ pub(crate) mod tests {
                 .unwrap(),
         );
 
-        let resolved_correct_json = dbg!(
+        let (resolved_correct_json, _) = dbg!(
             resolver
                 .resolve_well_known(correct_json_server_address.as_str())
                 .await
         );
-        let resolved_broken_json = dbg!(
+        let (resolved_broken_json, _) = dbg!(
             resolver
                 .resolve_well_known(broken_json_server_address.as_str())
                 .await
         );
-        let resolved_oversize_response = dbg!(
+        let (resolved_oversize_response, _) = dbg!(
             resolver
                 .resolve_well_known(oversize_response_server_address.as_str())
                 .await
@@ -1325,6 +1462,19 @@ pub(crate) mod tests {
         let response = resolver.resolve_server(server_name).await;
         assert!(matches!(response, Err(ServerResolutionError::Gone)));
         assert_le!(now.elapsed().as_millis(), 50);
+    }
+
+    #[rstest]
+    #[case::valid_header(
+        "s-maxage=300,must-revalidate, max-age=3600, public",
+        Some(Duration::from_secs(3600))
+    )]
+    #[case::invalid_header_no_value("max-age=, s-maxage", None)]
+    #[case::invalid_header_no_directive("public", None)]
+    fn test_parse_cache_header(#[case] header_str: &str, #[case] expected: Option<Duration>) {
+        init_tracing();
+
+        assert_eq!(parse_cache_control(header_str), expected);
     }
 
     /// Test that a 410 Gone cache entry actually gets removed once it expires

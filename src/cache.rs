@@ -126,10 +126,12 @@ impl Cache {
 
     /// Set a new resolution entry, saving the hostname map if the SNI hostname and server name do
     /// not match
-    pub fn set(&self, server_name: String, resolution: &Resolution) {
+    pub fn set(&self, server_name: String, resolution: &Resolution, ttl: Option<Duration>) {
         let sni_hostname = resolution.sni_hostname();
         let is_override = resolution.is_override;
         trace!(%server_name, %sni_hostname, ?resolution, "Setting cache entry");
+
+        let ttl = ttl.unwrap_or(self.ttl).min(MAXIMUM_CACHE_DURATION);
 
         {
             let mut cache = self.inner.write();
@@ -137,7 +139,7 @@ impl Cache {
                 server_name.clone(),
                 CacheEntry {
                     resolution: resolution.clone(),
-                    expires_at: SystemTime::now() + self.ttl.min(MAXIMUM_CACHE_DURATION),
+                    expires_at: SystemTime::now() + ttl,
                     is_override,
                 },
             );
@@ -215,7 +217,7 @@ mod tests {
             resolution_step: ResolutionStep::WellKnownHostPort,
         };
 
-        cache.set(server_name.to_string(), &resolution);
+        cache.set(server_name.to_string(), &resolution, None);
         dbg!(&cache);
 
         assert_eq!(dbg!(cache.inner.read().values().count()), 1);
@@ -251,7 +253,7 @@ mod tests {
 
         assert_eq!(cache.lookup("doesn't exist"), CacheLookup::Miss);
 
-        cache.set(server_name.to_string(), &resolution);
+        cache.set(server_name.to_string(), &resolution, None);
         assert_eq!(
             dbg!(cache.lookup(server_name)),
             CacheLookup::Valid(resolution.clone())
@@ -288,8 +290,8 @@ mod tests {
             resolution_step: ResolutionStep::HostPort,
         };
 
-        cache.set(String::from(server1_name), &server1_resolution);
-        cache.set(String::from(server2_name), &server2_resolution);
+        cache.set(String::from(server1_name), &server1_resolution, None);
+        cache.set(String::from(server2_name), &server2_resolution, None);
 
         // Actual test
         let server1_removed = cache.remove_entry(server1_name);
@@ -339,8 +341,8 @@ mod tests {
             resolution_step: ResolutionStep::HostPort,
         };
 
-        cache.set(String::from(server1_name), &server1_resolution);
-        cache.set(String::from(server2_name), &server2_resolution);
+        cache.set(String::from(server1_name), &server1_resolution, None);
+        cache.set(String::from(server2_name), &server2_resolution, None);
 
         // Actual test
         cache.clear();
@@ -370,7 +372,7 @@ mod tests {
             resolution_step: ResolutionStep::SrvMatrix,
         };
 
-        cache.set(String::from(server_name), &resolution);
+        cache.set(String::from(server_name), &resolution, None);
 
         match cache.lookup(server_name) {
             CacheLookup::ExpiredOverride(expired_name) => {
@@ -395,7 +397,7 @@ mod tests {
             resolution_step: ResolutionStep::HostPort,
         };
 
-        cache.set(String::from(server_name), &resolution);
+        cache.set(String::from(server_name), &resolution, None);
 
         match cache.lookup(server_name) {
             CacheLookup::Miss => {}
@@ -421,7 +423,7 @@ mod tests {
             resolution_step: ResolutionStep::HostPort,
         };
 
-        cache.set(String::from(server_name), &resolution);
+        cache.set(String::from(server_name), &resolution, None);
 
         assert!(matches!(
             cache.lookup("matrix.example.org"),
@@ -459,16 +461,17 @@ mod tests {
             resolution_step: ResolutionStep::HostPort,
         };
 
-        cache.set(String::from(server1_name), &server1_resolution);
-        cache.set(String::from(server2_name), &server2_resolution);
+        cache.set(String::from(server1_name), &server1_resolution, None);
+        cache.set(String::from(server2_name), &server2_resolution, None);
 
         // Actual test
         let servers = dbg!(cache.get_all());
         assert_eq!(servers.len(), 2);
     }
 
+    /// Tests that entries expire immediately when cache is set to 0 on the cache itself
     #[rstest]
-    fn get_expired() {
+    fn test_get_expired_cache() {
         init_tracing();
 
         let cache = Cache::new(Duration::from_secs(0));
@@ -484,7 +487,35 @@ mod tests {
             resolution_step: ResolutionStep::WellKnownHostPort,
         };
 
-        cache.set(server_name.to_string(), &resolution);
+        cache.set(server_name.to_string(), &resolution, None);
+        std::thread::sleep(Duration::from_secs(1));
+
+        assert_none!(cache.get(server_name));
+    }
+
+    /// Tests that entries expire immediately when the entry's TTL is set to 0
+    #[rstest]
+    fn test_get_expired_entry() {
+        init_tracing();
+
+        let cache = Cache::new(Duration::from_secs(300));
+
+        let server_name = "matrix.org";
+        let resolution = Resolution {
+            destination: ResolvedDestination::Named(
+                "matrix-federation.matrix.org".to_string(),
+                "8448".to_string(),
+            ),
+            host: "matrix-federation.matrix.org".to_string(),
+            is_override: true,
+            resolution_step: ResolutionStep::WellKnownHostPort,
+        };
+
+        cache.set(
+            server_name.to_string(),
+            &resolution,
+            Some(Duration::from_secs(0)),
+        );
         std::thread::sleep(Duration::from_secs(1));
 
         assert_none!(cache.get(server_name));
@@ -507,7 +538,7 @@ mod tests {
             resolution_step: ResolutionStep::WellKnownHostPort,
         };
 
-        cache.set(server_name.to_string(), &resolution);
+        cache.set(server_name.to_string(), &resolution, None);
         std::thread::sleep(Duration::from_secs(1));
 
         // First lookup deletes the cache but leaves the hostname mapping
