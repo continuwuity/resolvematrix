@@ -56,24 +56,41 @@ jobs:
           github-token: ${{ secrets.GH_PUBLIC_RO }}
 
       - name: Run Clippy lints
-        run: |
-          cargo clippy \
-            --workspace \
-            --all-features \
-            --locked \
-            --profile test \
-            --no-deps \
-            -- \
-            -D warnings
+        run: >
+          cargo clippy
+          --workspace
+          --all-features
+          --locked
+          --profile=test
+          --no-deps
+          --
+          -D warnings
 
       - name: Run Cargo tests
-        run: |
-          cargo test \
-            --workspace \
-            --all-features \
-            --locked \
-            --profile test \
-            --no-fail-fast
+        run: >
+          cargo +nightly test
+          --workspace
+          --all-features
+          --locked
+          --profile=test
+          --no-fail-fast
+          --
+          -Z unstable-options
+          --format=json
+          --report-time
+          | tee target/cargo-test.json
+
+
+      - name: Install markdown-test-report
+        run: cargo-binstall -y --force --no-symlinks markdown-test-report
+      - name: Generate test report
+        # https://forgejo.org/2026-10-release-v17-0/#forgejo-actions-job-summaries
+        run: >
+          $CARGO_HOME/bin/markdown-test-report
+          $FORGEJO_WORKSPACE/target/cargo-test.json
+          --output=$FORGEJO_STEP_SUMMARY
+          --summary
+          --verbose
 
       - name: Install cargo-msrv
         run: cargo-binstall -y --no-symlinks cargo-msrv
