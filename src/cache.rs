@@ -1,4 +1,5 @@
 use crate::resolution::Resolution;
+use crate::server::MAXIMUM_CACHE_DURATION;
 use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -136,7 +137,7 @@ impl Cache {
                 server_name.clone(),
                 CacheEntry {
                     resolution: resolution.clone(),
-                    expires_at: SystemTime::now() + self.ttl,
+                    expires_at: SystemTime::now() + self.ttl.min(MAXIMUM_CACHE_DURATION),
                     is_override,
                 },
             );

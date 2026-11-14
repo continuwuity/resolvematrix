@@ -22,6 +22,14 @@ use serde::Deserialize;
 use serde_json;
 use tokio_stream::StreamExt;
 
+/// How long to cache a resolution for if no value is provided in
+/// Cache-Control (.well-known resolution) or as TTL (DNS SRV).
+pub(crate) const DEFAULT_CACHE_DURATION: Duration = Duration::from_secs(60 * 60 * 24);
+
+/// Maximum allowable cache duration set from Cache-Control (.well-known resolution)
+/// or TTL (DNS SRV).
+pub(crate) const MAXIMUM_CACHE_DURATION: Duration = Duration::from_secs(60 * 60 * 24 * 90);
+
 /// A custom DNS resolver for `reqwest` that handles Matrix server name resolution.
 ///
 /// This resolver integrates with the `MatrixResolver` cache and logic to ensure that
@@ -185,9 +193,9 @@ impl MatrixResolverBuilder {
                 InvalidBuilderOption::ResolutionCacheExclusive,
             ));
         }
-        let cache = self.resolution_cache.unwrap_or(Cache::new(
-            self.cache_ttl.unwrap_or(Duration::from_secs(60 * 60 * 24)),
-        ));
+        let cache = self
+            .resolution_cache
+            .unwrap_or(Cache::new(self.cache_ttl.unwrap_or(DEFAULT_CACHE_DURATION)));
 
         Ok(MatrixResolver {
             client,
