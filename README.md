@@ -9,7 +9,7 @@
 [![GitHub mirror](https://img.shields.io/badge/GitHub-mirror-blue?style=flat&logo=github&labelColor=fff&logoColor=24292f)](https://github.com/continuwuity/resolvematrix)
 
 `resolvematrix` is a Rust library providing the ability to resolve Matrix server-to-server endpoints from the server name.
-It conforms to the [Server discovery chapter of the Matrix specification](https://spec.matrix.org/v1.18/server-server-api/#resolving-server-names).
+It conforms to the [Server discovery chapter of the Matrix specification](https://spec.matrix.org/v1.19/server-server-api/#resolving-server-names).
 
 The library is tested against the https://resolvematrix.dev suite and other live Matrix servers.
 

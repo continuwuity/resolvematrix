@@ -339,7 +339,8 @@ impl MatrixResolver {
     }
 
     /// Resolve the actual destination according to Matrix spec.
-    /// <https://matrix.org/docs/spec/server_server/r0.1.4#resolving-server-names>
+    ///
+    /// <https://spec.matrix.org/v1.19/server-server-api/#resolving-server-names>
     #[tracing::instrument(
         name = "actual",
         level = "debug",

@@ -3,9 +3,9 @@ use serde::Serialize;
 use std::fmt::Display;
 use std::net::{IpAddr, SocketAddr};
 
-/// Resolution steps as defined by the Matrix specification (v1.18)
+/// Resolution steps as defined by the Matrix specification (v1.19)
 ///
-/// https://spec.matrix.org/v1.18/server-server-api/#server-discovery
+/// <https://spec.matrix.org/v1.19/server-server-api/#resolving-server-names>
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum ResolutionStep {
     /// Step 1
