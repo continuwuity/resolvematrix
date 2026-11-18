@@ -355,18 +355,6 @@ impl MatrixResolver {
         fields(dest = %dest)
     )]
     async fn resolve_actual_dest(&self, dest: &str) -> Result<Resolution, ServerResolutionError> {
-        #[cfg(feature = "unstable-msc4188")]
-        if let mut guard = self.gone.upgradable_read()
-            && let Some(expires) = guard.get(dest)
-        {
-            if *expires > SystemTime::now() {
-                return Err(ServerResolutionError::Gone);
-            }
-            // Remove the stale entry
-            guard.with_upgraded(|gone| {
-                gone.remove(dest);
-            });
-        }
         // 1. If the hostname is an IP literal
         if let Some((ip, port)) = get_ip_with_port(dest) {
             debug!(
@@ -403,11 +391,16 @@ impl MatrixResolver {
         }
 
         #[cfg(feature = "unstable-msc4188")]
-        if let Some(gone_until) = self.gone_until(dest) {
-            if gone_until > SystemTime::now() {
+        if let mut guard = self.gone.upgradable_read()
+            && let Some(expires) = guard.get(dest)
+        {
+            if *expires > SystemTime::now() {
                 return Err(ServerResolutionError::Gone);
             }
-            self.gone.write().remove(dest);
+            // Remove the stale entry
+            guard.with_upgraded(|gone| {
+                gone.remove(dest);
+            });
         }
 
         // 3. Well-known delegation
