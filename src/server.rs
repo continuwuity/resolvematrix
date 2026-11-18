@@ -488,6 +488,7 @@ impl MatrixResolver {
                         well_known_ttl,
                     ))
                 }
+                // 3.3 + 3.4 + 3.5
                 WellKnownServerResult::Domain(domain, None) => {
                     // 3.3/3.4: Hostname, no port in .well-known
                     if let Some(SrvRecordResult {
@@ -712,7 +713,9 @@ impl MatrixResolver {
         (server_name.to_string(), None)
     }
 
-    /// Query the provided hostname for matrix SRV records
+    /// Query SRV records for a hostname, returning `Ok(Some(...))` if found,
+    /// `Ok(None)` if no records found, and `Err(...)` if there were errors
+    /// contacting the DNS server.
     #[tracing::instrument(
         level = "trace",
         skip(self),
@@ -728,16 +731,30 @@ impl MatrixResolver {
         ];
         for srv in &srv_names {
             trace!(%srv, "Querying SRV record");
-            let lookup = self.resolver.srv_lookup(srv).await;
-            if let Ok(result) = lookup
-                && let Some(record) = result
-                    .answers()
-                    .iter()
-                    .filter_map(|record| match &record.data {
-                        RData::SRV(srv) => Some(srv),
-                        _ => None,
-                    })
-                    .next()
+            let result = self.resolver.srv_lookup(srv).await;
+
+            if let Err(err) = result {
+                if err.is_no_records_found() {
+                    debug!(%srv, %err, "No records found for SRV domain");
+                    continue;
+                }
+                warn!(%srv, %err, "Fatal error while resolving DNS record");
+                return Err(err.into());
+            }
+
+            let result = result
+                // expect here *should* never actually be hit because of the above
+                // `let Err` check - silversys, 2026-11-18
+                .expect("dns record");
+
+            if let Some(record) = result
+                .answers()
+                .iter()
+                .filter_map(|record| match &record.data {
+                    RData::SRV(srv) => Some(srv),
+                    _ => None,
+                })
+                .next()
             {
                 let was_fed = srv.contains("-fed");
                 let target = record.target.to_utf8();
@@ -760,8 +777,9 @@ impl MatrixResolver {
                     was_fed,
                     ttl,
                 }));
-            }
-            trace!(?srv, "No SRV record found")
+            } else {
+                trace!(?srv, "No SRV record found")
+            };
         }
         trace!("No SRV records found for hostname");
         Ok(None)

@@ -3,8 +3,12 @@ use thiserror::Error;
 /// Error type for Matrix server resolution.
 #[derive(Debug, Error)]
 pub enum ServerResolutionError {
+    /// DNS resolution errors, commonly `SERVFAIL` or similar. `NXDOMAIN`
+    /// does not cause this error, and simply falls through according
+    /// to the server resolution spec.
     #[error("DNS resolution error: {0}")]
     Dns(#[from] hickory_resolver::net::NetError),
+
     #[cfg(feature = "unstable-msc4188")]
     #[error("Server is gone")]
     Gone,
