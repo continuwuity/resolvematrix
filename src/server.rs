@@ -535,7 +535,7 @@ impl MatrixResolver {
                                 is_override: true,
                                 resolution_step: ResolutionStep::WellKnownDefaultPort,
                             },
-                            None,
+                            ttl,
                         ))
                     }
                 }
