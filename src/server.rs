@@ -816,12 +816,6 @@ pub(crate) mod tests {
     use tracing::{debug, info, level_filters::LevelFilter};
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-    fn socket_addrs_from_ips(ips: impl IntoIterator<Item = IpAddr>, port: u16) -> Vec<SocketAddr> {
-        ips.into_iter()
-            .map(|ip| SocketAddr::new(ip, port))
-            .collect()
-    }
-
     /// Helper function to initialize tracing for tests
     pub(crate) fn init_tracing() {
         let _ = tracing_subscriber::registry()
@@ -985,25 +979,6 @@ pub(crate) mod tests {
                 assert!(port_num > 0, "Port should be greater than 0");
             }
         }
-    }
-
-    #[test]
-    fn test_dns_candidate_order_preserved() {
-        let addrs = socket_addrs_from_ips(
-            [
-                IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]),
-                IpAddr::from([127, 0, 0, 1]),
-            ],
-            8448,
-        );
-
-        assert_eq!(
-            addrs,
-            vec![
-                SocketAddr::new(IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), 8448),
-                SocketAddr::new(IpAddr::from([127, 0, 0, 1]), 8448),
-            ]
-        );
     }
 
     /// Test servers with explicit ports

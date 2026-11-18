@@ -255,12 +255,6 @@ mod tests {
 
     use super::*;
 
-    fn socket_addrs_from_ips(ips: impl IntoIterator<Item = IpAddr>, port: u16) -> Vec<SocketAddr> {
-        ips.into_iter()
-            .map(|ip| SocketAddr::new(ip, port))
-            .collect()
-    }
-
     #[rstest]
     #[tokio::test]
     async fn test_resolution() {
@@ -342,25 +336,6 @@ mod tests {
             resolution_step: ResolutionStep::HostPort,
         };
         assert_eq!(invalid_dns_address.destination_addr(&resolver).await, None);
-    }
-
-    #[test]
-    fn test_socket_addrs_from_ips_preserves_order() {
-        let addrs = socket_addrs_from_ips(
-            [
-                IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]),
-                IpAddr::from([127, 0, 0, 1]),
-            ],
-            8448,
-        );
-
-        assert_eq!(
-            addrs,
-            vec![
-                SocketAddr::new(IpAddr::from([0, 0, 0, 0, 0, 0, 0, 1]), 8448),
-                SocketAddr::new(IpAddr::from([127, 0, 0, 1]), 8448),
-            ]
-        );
     }
 
     #[rstest]
