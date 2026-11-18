@@ -382,7 +382,10 @@ impl MatrixResolver {
         skip(self),
         fields(dest = %dest)
     )]
-    async fn resolve_actual_dest(&self, dest: &str) -> Result<(Resolution, Option<Duration>), ServerResolutionError> {
+    async fn resolve_actual_dest(
+        &self,
+        dest: &str,
+    ) -> Result<(Resolution, Option<Duration>), ServerResolutionError> {
         // 1. If the hostname is an IP literal
         if let Some((ip, port)) = get_ip_with_port(dest) {
             debug!(
@@ -552,7 +555,8 @@ impl MatrixResolver {
             srv_port,
             was_fed,
             ttl,
-        }) = self.query_srv_record(dest).await? {
+        }) = self.query_srv_record(dest).await?
+        {
             trace!(
                 srv_host = %srv_host,
                 srv_port = srv_port,
@@ -713,7 +717,10 @@ impl MatrixResolver {
         skip(self),
         fields(hostname = %hostname)
     )]
-    async fn query_srv_record(&self, hostname: &str) -> Result<Option<SrvRecordResult>, ServerResolutionError> {
+    async fn query_srv_record(
+        &self,
+        hostname: &str,
+    ) -> Result<Option<SrvRecordResult>, ServerResolutionError> {
         let srv_names = [
             format!("_matrix-fed._tcp.{hostname}"),
             format!("_matrix._tcp.{hostname}"),
@@ -748,7 +755,7 @@ impl MatrixResolver {
                     srv_host: target.trim_end_matches('.').to_owned(),
                     srv_port: port,
                     was_fed,
-                    ttl
+                    ttl,
                 }));
             }
             trace!(?srv, "No SRV record found")
