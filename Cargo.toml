@@ -49,6 +49,7 @@ tracing = { version = "0.1.44", default-features = false, features = ["attribute
 tokio-stream = { version = "0.1.19", default-features = false }
 num-traits = { version = "0.2.19", default-features = false }
 serde_json = { version = "1.0.150", default-features = false }
+cache_control = "0.2.0"
 
 
 [dev-dependencies]

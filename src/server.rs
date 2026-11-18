@@ -1,17 +1,9 @@
-#[cfg(feature = "unstable-msc4188")]
-use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
-use std::str::FromStr;
-use std::sync::Arc;
-#[cfg(feature = "unstable-msc4188")]
-use std::time::SystemTime;
-use std::time::{Duration, Instant};
-
 use crate::cache::{Cache, CacheEntry, CacheLookup};
 use crate::error::{
     InvalidBuilderOption, LimitReadError, ServerResolutionError, ServerResolverBuilderError,
 };
 use crate::resolution::{Resolution, ResolutionStep, ResolvedDestination};
+use cache_control::CacheControl;
 use hickory_resolver::TokioResolver;
 use hickory_resolver::proto::rr::RData;
 use num_traits::ToPrimitive;
@@ -20,6 +12,14 @@ use parking_lot::RwLock;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use serde_json;
+#[cfg(feature = "unstable-msc4188")]
+use std::collections::HashMap;
+use std::net::{IpAddr, SocketAddr};
+use std::str::FromStr;
+use std::sync::Arc;
+#[cfg(feature = "unstable-msc4188")]
+use std::time::SystemTime;
+use std::time::{Duration, Instant};
 use tokio_stream::StreamExt;
 use tracing::{debug, trace, warn};
 
@@ -639,13 +639,10 @@ impl MatrixResolver {
         }
 
         let cache_control_header = resp.headers().get("cache-control");
-        let cache_control_duration = if let Some(header) = cache_control_header
-            && let Some(header_str) = header.to_str().ok()
-        {
-            parse_cache_control(header_str)
-        } else {
-            None
-        };
+        let cache_control_duration: Option<Duration> = cache_control_header
+            .and_then(|header| header.to_str().ok())
+            .and_then(CacheControl::from_header)
+            .and_then(|cc| cc.max_age);
 
         let json_data = match resp.limit_read().await {
             Ok(s) => serde_json::from_slice(&s),
@@ -901,53 +898,6 @@ fn get_ip_with_port(s: &str) -> Option<(IpAddr, Option<u16>)> {
         return Some((ip, None));
     }
     debug!(input = %s, "Input is not an IP literal");
-    None
-}
-
-/// Parses a `Cache-Control` header to get the value of the `max-age` directive as a Duration
-#[tracing::instrument(
-    name = "parse_cache_control",
-    level = "trace",
-    fields(%header)
-)]
-fn parse_cache_control(header: &str) -> Option<Duration> {
-    trace!("Parsing Cache-Control header");
-
-    let directives: Vec<String> = header
-        .split(',')
-        .map(|part| {
-            // Remove whitespace from the directive
-            part.chars()
-                .filter(|c| !c.is_whitespace())
-                .collect::<String>()
-        })
-        .collect();
-
-    for directive in directives {
-        trace!(
-            %directive,
-            "Attempting to parse directive"
-        );
-
-        let Some(seconds) = directive.strip_prefix("max-age=") else {
-            trace!(?directive, "Component is not max-age, skipping");
-            continue;
-        };
-
-        return match seconds.parse::<u64>() {
-            Ok(seconds) => {
-                let duration = Duration::from_secs(seconds);
-                debug!(%directive, ?duration, "Parsed Cache-Control directive");
-                Some(duration)
-            }
-            Err(_) => {
-                warn!(%directive, "Could not parse max-age as u64, using default duration");
-                None
-            }
-        };
-    }
-
-    debug!("Cache-Control header does not contain a max-age directive");
     None
 }
 
@@ -1471,19 +1421,6 @@ pub(crate) mod tests {
         let response = resolver.resolve_server(server_name).await;
         assert!(matches!(response, Err(ServerResolutionError::Gone)));
         assert_le!(now.elapsed().as_millis(), 50);
-    }
-
-    #[rstest]
-    #[case::valid_header(
-        "s-maxage=300,must-revalidate, max-age=3600, public",
-        Some(Duration::from_secs(3600))
-    )]
-    #[case::invalid_header_no_value("max-age=, s-maxage", None)]
-    #[case::invalid_header_no_directive("public", None)]
-    fn test_parse_cache_header(#[case] header_str: &str, #[case] expected: Option<Duration>) {
-        init_tracing();
-
-        assert_eq!(parse_cache_control(header_str), expected);
     }
 
     /// Test that a 410 Gone cache entry actually gets removed once it expires

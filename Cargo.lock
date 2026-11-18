@@ -254,6 +254,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cache_control"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bf2a5fb3207c12b5d208ebc145f967fea5cac41a021c37417ccc31ba40f39ee"
+
+[[package]]
 name = "cc"
 version = "1.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1822,6 +1828,7 @@ name = "resolvematrix"
 version = "1.4.2"
 dependencies = [
  "assertables",
+ "cache_control",
  "hickory-resolver",
  "httpmock",
  "num-traits",
