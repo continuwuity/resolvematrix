@@ -742,7 +742,9 @@ impl MatrixResolver {
                 let target = record.target.to_utf8();
                 let port = record.port;
                 let ttl = {
-                    let diff = result.valid_until() - Instant::now();
+                    let diff = result
+                        .valid_until()
+                        .saturating_duration_since(Instant::now());
 
                     if diff < MINIMUM_DNS_SRV_TTL {
                         None
