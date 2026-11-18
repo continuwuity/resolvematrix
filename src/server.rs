@@ -10,7 +10,9 @@ use std::time::Duration;
 use std::time::SystemTime;
 
 use crate::cache::{Cache, CacheEntry, CacheLookup};
-use crate::error::{InvalidBuilderOption, ServerResolutionError, ServerResolverBuilderError};
+use crate::error::{
+    InvalidBuilderOption, LimitReadError, ServerResolutionError, ServerResolverBuilderError,
+};
 use crate::resolution::{Resolution, ResolutionStep, ResolvedDestination};
 use hickory_resolver::TokioResolver;
 use hickory_resolver::proto::rr::RData;
@@ -729,14 +731,6 @@ pub trait LimitReadExt {
     /// Reads the response body while enforcing a maximum size limit to prevent
     /// memory exhaustion.
     async fn limit_read(self) -> Result<Vec<u8>, LimitReadError>;
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum LimitReadError {
-    #[error("size limit exceeded")]
-    SizeLimitExceeded,
-    #[error("chunk error")]
-    ChunkError(reqwest::Error),
 }
 
 impl LimitReadExt for reqwest::Response {

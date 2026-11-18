@@ -28,3 +28,11 @@ pub enum InvalidBuilderOption {
     #[error("`resolution_cache` and `cache_ttl` are mutually exclusive")]
     ResolutionCacheExclusive,
 }
+
+#[derive(Debug, Error)]
+pub enum LimitReadError {
+    #[error("size limit exceeded")]
+    SizeLimitExceeded,
+    #[error("chunk error")]
+    ChunkError(reqwest::Error),
+}
