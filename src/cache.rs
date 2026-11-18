@@ -3,7 +3,7 @@ use parking_lot::RwLock;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// Simple cache entry with expiry time.
 #[derive(Clone, Debug)]
@@ -153,7 +153,7 @@ impl Cache {
 
     /// Remove a single entry from the cache, returning the previously existing entry if there was one
     pub fn remove_entry(&self, server_name: &str) -> Option<CacheEntry> {
-        tracing::debug!(%server_name, "Removing cache entry");
+        debug!(%server_name, "Removing cache entry");
         let removed = {
             let mut cache = self.inner.write();
             cache.remove(server_name)
@@ -169,7 +169,7 @@ impl Cache {
 
     /// Clear all cache entries. Returns nothing.
     pub fn clear(&self) {
-        tracing::debug!("Clearing cache and hostname map");
+        debug!("Clearing cache and hostname map");
         {
             let mut cache = self.inner.write();
             cache.clear();
