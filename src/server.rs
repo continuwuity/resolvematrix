@@ -200,6 +200,10 @@ impl MatrixResolverBuilder {
     }
 }
 
+/// How long to cache a 410 Gone response for .well-known resolutions
+#[cfg(feature = "unstable-msc4188")]
+const WELL_KNOWN_GONE_CACHE_DURATION: Duration = Duration::from_secs(60 * 60 * 24 * 90);
+
 /// The main resolver struct for Matrix server resolution.
 pub struct MatrixResolver {
     client: Client,
@@ -352,7 +356,7 @@ impl MatrixResolver {
         if let mut guard = self.gone.upgradable_read()
             && let Some(expires) = guard.get(dest)
         {
-            if *expires < SystemTime::now() {
+            if *expires > SystemTime::now() {
                 return Err(ServerResolutionError::Gone);
             }
             // Remove the stale entry
@@ -480,7 +484,7 @@ impl MatrixResolver {
                 WellKnownServerResult::Gone => {
                     self.gone.write().insert(
                         dest.to_owned(),
-                        SystemTime::now().add(Duration::from_secs(3600 * 24 * 90)),
+                        SystemTime::now().add(WELL_KNOWN_GONE_CACHE_DURATION),
                     );
                     Err(ServerResolutionError::Gone)
                 }
@@ -1355,5 +1359,37 @@ pub(crate) mod tests {
         let response = resolver.resolve_server(server_name).await;
         assert!(matches!(response, Err(ServerResolutionError::Gone)));
         assert_le!(now.elapsed().as_millis(), 50);
+    }
+
+    /// Test that a 410 Gone cache entry actually gets removed once it expires
+    #[cfg(feature = "unstable-msc4188")]
+    #[rstest]
+    #[tokio::test]
+    async fn test_gone_removed_future() {
+        use assertables::assert_le;
+        use std::time::Instant;
+
+        init_tracing();
+
+        let resolver = Arc::new(MatrixResolver::new().unwrap());
+
+        let dest = "matrix.org";
+        resolver.gone.write().insert(
+            dest.to_owned(),
+            SystemTime::now().add(Duration::from_secs(1)),
+        );
+
+        let now = Instant::now();
+        let response = resolver.resolve_server(dest).await;
+        assert!(matches!(response, Err(ServerResolutionError::Gone)));
+        assert_le!(now.elapsed().as_millis(), 50);
+        assert!(resolver.gone.read().contains_key(dest));
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+
+        let response = resolver.resolve_server(dest).await;
+        assert!(response.is_ok());
+
+        assert!(!resolver.gone.read().contains_key(dest));
     }
 }
