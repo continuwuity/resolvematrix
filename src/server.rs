@@ -581,7 +581,7 @@ impl MatrixResolver {
         let wk: WellKnown = match json_data {
             Ok(wk) => wk,
             Err(e) => {
-                tracing::info!(
+                tracing::debug!(
                     error = %e,
                     url = %url,
                     "Failed to parse well-known into valid JSON"
