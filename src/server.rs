@@ -1,8 +1,6 @@
 #[cfg(feature = "unstable-msc4188")]
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-#[cfg(feature = "unstable-msc4188")]
-use std::ops::Add;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -480,7 +478,7 @@ impl MatrixResolver {
                 WellKnownServerResult::Gone => {
                     self.gone.write().insert(
                         dest.to_owned(),
-                        SystemTime::now().add(WELL_KNOWN_GONE_CACHE_DURATION),
+                        SystemTime::now() + WELL_KNOWN_GONE_CACHE_DURATION,
                     );
                     Err(ServerResolutionError::Gone)
                 }
@@ -1334,10 +1332,10 @@ pub(crate) mod tests {
         let resolver = Arc::new(MatrixResolver::new().unwrap());
 
         let dest = "matrix.org";
-        resolver.gone.write().insert(
-            dest.to_owned(),
-            SystemTime::now().add(Duration::from_secs(1)),
-        );
+        resolver
+            .gone
+            .write()
+            .insert(dest.to_owned(), SystemTime::now() + Duration::from_secs(1));
 
         let now = Instant::now();
         let response = resolver.resolve_server(dest).await;
