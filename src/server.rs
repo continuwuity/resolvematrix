@@ -12,6 +12,7 @@ use parking_lot::RwLock;
 use reqwest::{Client, StatusCode};
 use serde::Deserialize;
 use serde_json;
+use std::cmp::min;
 #[cfg(feature = "unstable-msc4188")]
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -444,7 +445,7 @@ impl MatrixResolver {
         }
 
         // 3. Well-known delegation
-        if let (Some(res), ttl) = self.resolve_well_known(dest).await {
+        if let (Some(res), well_known_ttl) = self.resolve_well_known(dest).await {
             debug!(?res, step = "well_known", "Resolved .well-known delegation");
             return match res {
                 // 3.1: delegated_hostname is an IP literal, optionally with port else default
@@ -463,7 +464,7 @@ impl MatrixResolver {
                             is_override: false,
                             resolution_step: ResolutionStep::WellKnownIPLiteral,
                         },
-                        ttl,
+                        well_known_ttl,
                     ))
                 }
                 // 3.2: Hostname with explicit port in .well-known
@@ -484,7 +485,7 @@ impl MatrixResolver {
                             is_override: false,
                             resolution_step: ResolutionStep::WellKnownHostPort,
                         },
-                        ttl,
+                        well_known_ttl,
                     ))
                 }
                 WellKnownServerResult::Domain(domain, None) => {
@@ -493,7 +494,7 @@ impl MatrixResolver {
                         srv_host,
                         srv_port,
                         was_fed,
-                        ttl,
+                        ttl: srv_ttl,
                     }) = self.query_srv_record(&domain).await?
                     {
                         debug!(
@@ -502,6 +503,9 @@ impl MatrixResolver {
                             step = "well_known_host_srv",
                             "Resolved SRV from .well-known hostname without port"
                         );
+
+                        // Default to the lowest TTL of SRV and .well-known
+                        let ttl = min(srv_ttl, well_known_ttl);
 
                         Ok((
                             Resolution {
@@ -535,7 +539,7 @@ impl MatrixResolver {
                                 is_override: true,
                                 resolution_step: ResolutionStep::WellKnownDefaultPort,
                             },
-                            ttl,
+                            well_known_ttl,
                         ))
                     }
                 }
