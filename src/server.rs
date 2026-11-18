@@ -731,21 +731,17 @@ impl MatrixResolver {
         ];
         for srv in &srv_names {
             trace!(%srv, "Querying SRV record");
-            let result = self.resolver.srv_lookup(srv).await;
-
-            if let Err(err) = result {
-                if err.is_no_records_found() {
+            let result = match self.resolver.srv_lookup(srv).await {
+                Err(err) if err.is_no_records_found() => {
                     debug!(%srv, %err, "No records found for SRV domain");
                     continue;
                 }
-                warn!(%srv, %err, "Fatal error while resolving DNS record");
-                return Err(err.into());
-            }
-
-            let result = result
-                // expect here *should* never actually be hit because of the above
-                // `let Err` check - silversys, 2026-11-18
-                .expect("dns record");
+                Err(err) => {
+                    warn!(%srv, %err, "Fatal error while resolving DNS record");
+                    return Err(err.into());
+                }
+                Ok(result) => result,
+            };
 
             if let Some(record) = result
                 .answers()
