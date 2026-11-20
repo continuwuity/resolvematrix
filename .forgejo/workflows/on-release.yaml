@@ -1,0 +1,82 @@
+# This workflow automatically runs release actions, like building static binaries,
+# attaching them to releases, and pushing AUR packages.
+
+name: Release actions
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  # Allow running manually to get binaries for arbitrary commits.
+  # Does not create a release
+  workflow_dispatch:
+
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-binaries:
+    name: Build release binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # See supported build targets here: https://github.com/cross-rs/cross
+        target:
+          - "x86_64-unknown-linux-gnu"
+          - "x86_64-unknown-linux-musl"
+          - "x86_64-unknown-freebsd"
+          - "x86_64-unknown-netbsd"
+          - "aarch64-unknown-linux-gnu"
+          - "aarch64-unknown-linux-musl"
+          - "aarch64-unknown-freebsd"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: https://forgejo.ellis.link/continuwuation/continuwuity/.forgejo/actions/setup-rust@main
+        with:
+          github-token: ${{ secrets.GH_PUBLIC_RO }}
+
+      - name: Install cross
+        run: cargo binstall --no-confirm cross
+
+      - name: Build for ${{ matrix.target }}
+        run: >
+          cross build
+          --release
+          --package=resolvematrix-cli
+          --bin=resolvematrix
+          --target=${{ matrix.target }}
+
+      - name: Upload artifacts
+        uses: forgejo/upload-artifact@v4
+        with:
+          name: resolvematrix-release-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/resolvematrix
+
+  create-release:
+    name: Create draft release with binaries
+    needs: [build-release-binaries]
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download binary artifacts
+        uses: forgejo/download-artifact@v4
+        with:
+          pattern: resolvematrix-release-*
+          # Destination path for artifacts matching the pattern
+          path: binaries
+          # If true, the downloaded artifacts will be in the same directory specified by path.
+          # If false, the downloaded artifacts will be extracted into individual named directories within the specified path.
+          merge-multiple: true
+      - name: Create Release and Upload
+        uses: https://github.com/softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
+        with:
+          draft: true
+          files: binaries/*
+
+  #update-aur:
+  #  name: Update AUR packages
