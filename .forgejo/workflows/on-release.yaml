@@ -30,6 +30,9 @@ jobs:
           - "aarch64-unknown-linux-gnu"
           - "aarch64-unknown-linux-musl"
           - "aarch64-unknown-freebsd"
+    with:
+      cargo-filename: target/${{ matrix.target }}/release/resolvematrix
+      filename: "resolvematrix-release-${{ matrix.target }}"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -52,12 +55,22 @@ jobs:
           --bin=resolvematrix
           --target=${{ matrix.target }}
 
+      - name: Rename built file
+        with:
+          shell: bash
+        run:
+          mv "${{ inputs.cargo-filename }}" "${{ inputs.filename }}"
+
+      - name: Generate sha256sum
+        with:
+          shell: bash
+        run: |
+            sha256sum "${{ inputs.filename }}" > "${{ inputs.filename }}.sha256sum"
+
       - name: Upload artifacts
         uses: forgejo/upload-artifact@v4
         with:
-          name: resolvematrix-release-${{ matrix.target }}
-          path: target/${{ matrix.target }}/release/resolvematrix
-
+          path: ${{ inputs.filename }}*
   create-release:
     name: Create draft release with binaries
     needs: [build-release-binaries]
@@ -68,15 +81,16 @@ jobs:
         with:
           pattern: resolvematrix-release-*
           # Destination path for artifacts matching the pattern
-          path: binaries
+          path: artifacts
           # If true, the downloaded artifacts will be in the same directory specified by path.
           # If false, the downloaded artifacts will be extracted into individual named directories within the specified path.
           merge-multiple: true
+
       - name: Create Release and Upload
         uses: https://github.com/softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3
         with:
           draft: true
-          files: binaries/*
+          files: artifacts/*
 
   #update-aur:
   #  name: Update AUR packages
