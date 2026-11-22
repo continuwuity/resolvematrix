@@ -248,21 +248,6 @@ pub struct MatrixResolver {
 
 impl MatrixResolver {
     /// Returns a builder object to be used to set additional options
-    ///
-    /// Example
-    ///
-    /// ```rust,no_run
-    /// # use std::time::Duration;
-    /// # use resolvematrix::server::{MatrixResolver, MatrixResolverBuilder};
-    /// let resolver = MatrixResolver::builder()
-    ///     .cache_ttl(Duration::from_secs(10))
-    ///     .build();
-    ///
-    /// // Or by directly accessing the builder
-    /// let resolver = MatrixResolverBuilder::new()
-    ///     .cache_ttl(Duration::from_secs(10))
-    ///     .build();
-    /// ```
     #[deprecated(since = "1.5.1", note = "Please use MatrixResolverBuilder instead")]
     pub fn builder() -> MatrixResolverBuilder {
         MatrixResolverBuilder::new()

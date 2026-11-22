@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueEnum};
-use resolvematrix::{resolution::Resolution, server::MatrixResolver};
+use resolvematrix::{resolution::Resolution, server::MatrixResolverBuilder};
 use ruma::{
     api::{
         IncomingResponse, OutgoingRequest,
@@ -59,7 +59,7 @@ async fn main() -> Result<()> {
     let args = Args::parse();
 
     let resolver = Arc::new(
-        MatrixResolver::builder()
+        MatrixResolverBuilder::new()
             .dangerous_tls_accept_invalid_certs(args.allow_invalid_tls_certificates)
             .build()
             .expect("should be able to build resolver"),
