@@ -263,6 +263,7 @@ impl MatrixResolver {
     ///     .cache_ttl(Duration::from_secs(10))
     ///     .build();
     /// ```
+    #[deprecated(since = "1.5.1", note = "Please use MatrixResolverBuilder instead")]
     pub fn builder() -> MatrixResolverBuilder {
         MatrixResolverBuilder::new()
     }
@@ -275,19 +276,6 @@ impl MatrixResolver {
     /// Returns an error if the resolver fails to build. See also `MatrixResolverBuilder.build()`.
     pub fn new() -> Result<Self, ServerResolverBuilderError> {
         MatrixResolverBuilder::new().build()
-    }
-
-    /// Create a new `MatrixResolver` with a custom cache TTL.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the DNS resolver or HTTP client cannot be initialized.
-    #[deprecated(
-        since = "0.1.0",
-        note = "use `MatrixResolverBuilder::new().cache_ttl(Duration).build()` instead"
-    )]
-    pub fn new_with_ttl(cache_ttl: Duration) -> Result<Self, ServerResolverBuilderError> {
-        MatrixResolverBuilder::new().cache_ttl(cache_ttl).build()
     }
 
     /// Create a client with custom builder that can be reused for all Matrix servers.
