@@ -5,6 +5,8 @@ use crate::error::{
 use crate::resolution::{Resolution, ResolutionStep, ResolvedDestination};
 use cache_control::CacheControl;
 use hickory_resolver::TokioResolver;
+use hickory_resolver::net::{DnsError, NetError};
+use hickory_resolver::proto::op::ResponseCode;
 use hickory_resolver::proto::rr::RData;
 use num_traits::ToPrimitive;
 #[cfg(feature = "unstable-msc4188")]
@@ -705,7 +707,13 @@ impl MatrixResolver {
         for srv in &srv_names {
             trace!(%srv, "Querying SRV record");
             let result = match self.resolver.srv_lookup(srv).await {
-                Err(err) if err.is_no_records_found() => {
+                Err(err)
+                    if err.is_no_records_found()
+                        || matches!(
+                            err,
+                            NetError::Dns(DnsError::ResponseCode(ResponseCode::ServFail))
+                        ) =>
+                {
                     debug!(%srv, %err, "No records found for SRV domain");
                     continue;
                 }
