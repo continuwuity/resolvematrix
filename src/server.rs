@@ -255,8 +255,9 @@ impl MatrixResolver {
         MatrixResolverBuilder::new()
     }
 
-    /// Create a new `MatrixResolver` with default options. For advanced options, use `MatrixResolverBuilder`
-    /// or `MatrixResolver::builder()` (returns `MatrixResolverBuilder::new()`)
+    /// Create a new `MatrixResolver` with default options. For advanced options,
+    /// use `MatrixResolverBuilder`.
+    ///
     ///
     /// # Errors
     ///
