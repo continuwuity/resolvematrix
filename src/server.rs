@@ -914,6 +914,7 @@ pub(crate) mod tests {
     use httpmock::Method::GET;
     use httpmock::MockServer;
     use rstest::rstest;
+    use std::assert_matches;
     use tracing::{debug, info, level_filters::LevelFilter};
     use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
@@ -1420,12 +1421,12 @@ pub(crate) mod tests {
 
         let resolver = Arc::new(MatrixResolver::new().unwrap());
         // This server always returns HTTP 410 to `/.well-known/matrix/server`
-        let response = resolver.resolve_server(server_name).await;
-        assert!(matches!(response, Err(ServerResolutionError::Gone)));
+        let response = dbg!(resolver.resolve_server(server_name).await);
+        assert_matches!(response, Err(ServerResolutionError::Gone));
         // Querying the server again should immediately get bounced
         let now = Instant::now();
-        let response = resolver.resolve_server(server_name).await;
-        assert!(matches!(response, Err(ServerResolutionError::Gone)));
+        let response = dbg!(resolver.resolve_server(server_name).await);
+        assert_matches!(response, Err(ServerResolutionError::Gone));
         assert_le!(now.elapsed().as_millis(), 50);
     }
 
