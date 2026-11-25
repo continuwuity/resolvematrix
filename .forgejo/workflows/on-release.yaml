@@ -74,7 +74,7 @@ jobs:
   create-release:
     name: Create draft release with binaries
     needs: [build-release-binaries]
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(forgejo.ref, 'refs/tags/')
     steps:
       - name: Download binary artifacts
         uses: forgejo/download-artifact@v4
