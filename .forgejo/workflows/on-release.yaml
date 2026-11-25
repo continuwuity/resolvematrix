@@ -15,6 +15,10 @@ on:
 permissions:
   contents: write
 
+defaults:
+  run:
+    shell: bash
+
 jobs:
   build-release-binaries:
     name: Build release binaries
@@ -30,9 +34,6 @@ jobs:
           - "aarch64-unknown-linux-gnu"
           - "aarch64-unknown-linux-musl"
           - "aarch64-unknown-freebsd"
-    with:
-      cargo-filename: target/${{ matrix.target }}/release/resolvematrix
-      filename: "resolvematrix-release-${{ matrix.target }}"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -56,25 +57,20 @@ jobs:
           --target=${{ matrix.target }}
 
       - name: Rename built file
-        with:
-          shell: bash
-        run:
-          mv "${{ inputs.cargo-filename }}" "${{ inputs.filename }}"
+        run: mv "target/${{ matrix.target }}/release/resolvematrix" "resolvematrix-release-${{ matrix.target }}"
 
       - name: Generate sha256sum
-        with:
-          shell: bash
-        run: |
-            sha256sum "${{ inputs.filename }}" > "${{ inputs.filename }}.sha256sum"
+        run: sha256sum "resolvematrix-release-${{ matrix.target }}" > "resolvematrix-release-${{ matrix.target }}.sha256sum"
 
       - name: Upload artifacts
-        uses: forgejo/upload-artifact@v4
+        uses: actions/upload-artifact@v4
         with:
-          path: ${{ inputs.filename }}*
+          path: resolvematrix-release-${{ matrix.target }}*
+
   create-release:
     name: Create draft release with binaries
-    needs: [build-release-binaries]
-    if: startsWith(forgejo.ref, 'refs/tags/')
+    needs: [ build-release-binaries ]
+    if: "startsWith(github.ref, 'refs/tags/')"
     steps:
       - name: Download binary artifacts
         uses: forgejo/download-artifact@v4
