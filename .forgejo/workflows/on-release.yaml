@@ -21,7 +21,7 @@ defaults:
 
 jobs:
   build-release-binaries:
-    name: Build release binaries
+    name: Build release binaries (${{ matrix.target }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
